@@ -1,0 +1,27 @@
+Random Seed: 2496907950
+Input Seed: 1
+Number of runs: 1
+Assuming Kingman? 1
+Simulating drift? 0
+Output each set in ms format? 1
+Population Sizes: 0 = 10000 | 1 = 10000 | 
+Frequencies of inverted chromosomes: 0 = 0.2 | 1 = 0.4 | 
+Speciation time: 10000
+No demographic event.
+Age of inversion = 0
+Migration rate (pop0<-->1) = 0.02
+Bases per Morgan in homokaryotypic recombination 1e+08
+Random phi values? 0
+Gene flux (phi) = 0.2
+Inversion from: 0 to 1000 (0 - 1e-05 recUnits)
+Number of markers to simulate: 10
+Markers in random locations? 0
+10 Site positions read.
+Random sample of carriers? 0
+Sample in Pop 0: 10 0 
+Sample in Pop 1: 10 0 
+
+Mean LD (E[T1,n]) = 0.580324
+Mean TMRCA per site (E[T1]...E[Tn])
+ 0.581237 2.14204 0.733475 1.13208 1.8861 0.710802 1.19614 1.60609 1.16903 0.99843
+Elapsed time: 2.33168s
