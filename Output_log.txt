@@ -1,13 +1,14 @@
-Random Seed: 2496907950
+Random Seed: 1679929803
 Input Seed: 1
 Number of runs: 1
 Assuming Kingman? 1
 Simulating drift? 0
 Output each set in ms format? 1
-Population Sizes: 0 = 10000 | 1 = 10000 | 
-Frequencies of inverted chromosomes: 0 = 0.2 | 1 = 0.4 | 
-Speciation time: 10000
-No demographic event.
+Population Sizes: 0 = 10000 | 1 = 10000 | 2 = 10000 | 
+Frequencies of inverted chromosomes: 0 = 0.2 | 1 = 0.4 | 2 = 0.1 | 
+Speciation time: 1000
+Demography change time: 1000
+Reminder: this coeff multiplies all pop sizes in the preceding epoch
 Age of inversion = 0
 Migration rate (pop0<-->1) = 0.02
 Bases per Morgan in homokaryotypic recombination 1e+08
@@ -20,8 +21,12 @@ Markers in random locations? 0
 Random sample of carriers? 0
 Sample in Pop 0: 10 0 
 Sample in Pop 1: 10 0 
+Sample in Pop 2: 10 0 
+[demoChange] generation 1000: resulting popSizes = 4500 10000 10000 
+[demoChange] generation 2000: resulting popSizes = 4500 5500 10000 
+[demoChange] generation 3000: resulting popSizes = 4500 5500 6500 
 
-Mean LD (E[T1,n]) = 0.580324
+Mean LD (E[T1,n]) = 0.0766786
 Mean TMRCA per site (E[T1]...E[Tn])
- 0.581237 2.14204 0.733475 1.13208 1.8861 0.710802 1.19614 1.60609 1.16903 0.99843
-Elapsed time: 2.33168s
+ 0.255838 0.23491 0.182284 0.272387 0.357509 0.454356 0.215828 0.231223 0.262175 0.299715
+Elapsed time: 1.55143s

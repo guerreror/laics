@@ -110,6 +110,10 @@ struct World::WorldData		// Structure with the private data for World, accessed 
     double epoch_Ncoef;
     bool epochs_over;
     vector<unsigned int> epochType;
+	// for multi-time speciation/demography support:
+	vector<double>                epochValues;    // speciation frequencies or placeholder
+	vector<vector<unsigned int>>  epochPopSizes;  // explicit pop-size vectors for demography
+
     //CCD changes imported from sexCoal
     //vector<double> recomb_breakpoints;
     //vector< std::pair<double, shared_ptr < ARGNode > > > outputSegments;

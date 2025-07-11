@@ -221,70 +221,66 @@ void World::updateToNextEpoch(){
     DBG("In updateToNextEpoch() from: "<<outof_epoch<<" to: "<<into_epoch<<"...epochType= "<< worldData->epochType[outof_epoch])
 }
 
-void World::demoChange(){
-    if(worldData->generation == 1000) {
-         worldData->popSize.clear();
-         worldData->popSize.push_back(5000);
-         worldData->popSize.push_back(6000);
-         std::cerr << "DemoChange: Hardcoded update at generation 1000. New pop sizes:" << std::endl;
-         for (size_t i = 0; i < worldData->popSize.size(); ++i) {
-             std::cerr << "  Population " << i << ": " << worldData->popSize.at(i) << std::endl;
-         }
-    } else {
-         for(int pop = 0; pop < worldData->popSize.size(); ++pop) {
-             worldData->popSize.at(pop) = worldData->popSize.at(pop) * worldData->epoch_Ncoef;
-             std::cerr << "DemoChange happened";
-         }
+void World::demoChange() {
+    const auto &sizes = worldData->epochPopSizes[worldData->current_epoch];
+    if (sizes.empty()) return;
+
+    for (size_t i = 0; i < sizes.size() && i < worldData->popSize.size(); ++i) {
+        if (sizes[i] != 0) {
+            worldData->popSize[i] = sizes[i];
+        }
     }
+
+    std::cerr << "[demoChange] generation " << worldData->generation
+              << ": resulting popSizes = ";
+    for (auto s : worldData->popSize) std::cerr << s << " ";
+    std::cerr << "\n";
 }
 
 
 
-void World::speciation(){
-    
-    DBG("In speciation()")
-    
-    vector<shared_ptr<Chromosome> > migrants;
-    
-    for( cluster_t::iterator iter = cluster.begin(); iter != cluster.end(); ++iter ) {
-        if (0 !=(*iter).first.pop && ctxtNcarriers((*iter).first)>0 ){
-            unsigned long n=ctxtNcarriers((*iter).first);
-            
-            for(int who=0; who<n;++who){
-                shared_ptr<Chromosome> chrom = worldData->carriers->at((*iter).second).at(who);
-                chrom->setPopulation(0);								// change the context of this carrier to its new population
-                migrants.push_back( chrom );						    // add the carrier to the vector of its new population
+
+
+void World::speciation() {
+    // get new ancestor frequency for this event
+    double newFreq = worldData->epochValues[worldData->current_epoch];
+
+    // move all non-ancestor carriers into pop 0
+    vector<shared_ptr<Chromosome>> migrants;
+    for (auto &kv : cluster) {
+        const Context &ctx = kv.first;
+        int cid = kv.second;
+        if (ctx.pop != 0 && ctxtNcarriers(ctx) > 0) {
+            for (int i = 0; i < ctxtNcarriers(ctx); ++i) {
+                auto chr = worldData->carriers->at(cid)[i];
+                chr->setPopulation(0);
+                migrants.push_back(chr);
             }
-            worldData->carriers->at((*iter).second).clear();
+            worldData->carriers->at(cid).clear();
         }
     }
-    
-    if(migrants.size()>0){
-        DBG("Moving "<<migrants.size() <<" to pop 0")
-
-        for(int i=0; i<migrants.size(); ++i){
-            shared_ptr<Chromosome> migrant=migrants.at(i);
-            shared_ptr < ARGNode > newNode;
-            newNode.reset(new ARGNode(worldData->argNodeVec.size(), migrant, worldData->generation));
+    if (!migrants.empty()) {
+        for (auto &chr : migrants) {
+            auto newNode = make_shared<ARGNode>(worldData->argNodeVec.size(),
+                                                chr, worldData->generation);
             worldData->argNodeVec.push_back(newNode);
-            migrant->setDescendant(newNode);
-            worldData->carriers->at(cluster[migrant->getContext()]).push_back(migrant);
+            chr->setDescendant(newNode);
+            worldData->carriers->at(cluster[chr->getContext()]).push_back(chr);
         }
     }
-    
-    for( cluster_t::iterator iter = cluster.begin(); iter != cluster.end(); ++iter ){
-        if((*iter).first.pop==0){
-            if((*iter).first.inversion==1){
-                worldData->freq[(*iter).second]= worldData->ancesterFreq;}
-            else{
-                worldData->freq[(*iter).second]= 1-worldData->ancesterFreq;}
-        }
-        else{
-            worldData->freq[(*iter).second]= 0;
+
+    // update frequencies: ancestor contexts get newFreq, others zero
+    for (auto &kv : cluster) {
+        const Context &ctx = kv.first;
+        int cid = kv.second;
+        if (ctx.pop == 0) {
+            worldData->freq[cid] = (ctx.inversion == 1 ? newFreq : 1 - newFreq);
+        } else {
+            worldData->freq[cid] = 0.0;
         }
     }
-    
 }
+
 
 void World::freqStepToLoss(){
     

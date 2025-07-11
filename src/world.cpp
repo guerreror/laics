@@ -27,6 +27,8 @@
 	#include "ran_mk.h"
 	#include "world.h"
 	#include "argnode.h"
+	#include <algorithm>    // for sort()
+
 
 // ================================================================================================================
 
@@ -67,46 +69,53 @@ World::World(shared_ptr<Parameters::ParameterData> p){
     }
     
     worldData->current_epoch = 0;
-    
-    if(p->demography.at(0)==1) {
-        worldData->epoch_Ncoef = p->demography.at(2);
-        if(p->speciation.at(0)==1){
-            worldData->ancesterFreq = p->speciation.at(2);
-            
-            if(p->speciation.at(1)<p->demography.at(1)){
-                worldData->epoch_breaks.push_back(p->speciation.at(1));
-                worldData->epoch_breaks.push_back(p->demography.at(1));
-                worldData->epochType.push_back(1);
-                worldData->epochType.push_back(2);
-            }
-            else{
-                worldData->epoch_breaks.push_back(p->demography.at(1));
-                worldData->epoch_breaks.push_back(p->speciation.at(1));
-                worldData->epochType.push_back(2);
-                worldData->epochType.push_back(1);
-            }
-        }
-        else{
-            worldData->epoch_breaks.push_back(p->demography.at(1));
-            worldData->epochType.push_back(2);
+
+    struct Event { double time; int type; double value; vector<unsigned int> popSizes; };
+    vector<Event> events;
+
+    if (p->speciation.at(0) == 1) {
+        for (size_t i = 1; i + 1 < p->speciation.size(); i += 2) {
+            events.push_back({ p->speciation[i], 1, p->speciation[i+1], {} });
         }
     }
-    else{
-        worldData->epoch_Ncoef =1;
-        if(p->speciation.at(0)==1){
-            worldData->ancesterFreq = p->speciation.at(2);
-            worldData->epoch_breaks.push_back(p->speciation.at(1));
-            worldData->epochType.push_back(1);
+
+    if (p->demography.at(0) == 1) {
+        size_t np = p->popSizeVec.size();
+        size_t stride = 1 + np;
+        size_t count = (p->demography.size() - 1) / stride;
+        for (size_t e = 0; e < count; ++e) {
+            size_t idx = 1 + e * stride;
+            double t = p->demography[idx];
+            vector<unsigned int> sizes;
+            for (size_t k = 0; k < np; ++k) {
+                sizes.push_back(static_cast<unsigned int>(p->demography[idx + 1 + k]));
             }
+            events.push_back({ t, 2, 0.0, sizes });
         }
-    
-    if(p->inv_age>0){
-        worldData->epoch_breaks.push_back(p->inv_age);
-        worldData->epochType.push_back(0);
     }
-    
-    worldData->epochs_over = false;
-    if(worldData->epoch_breaks.size()==0) worldData->epochs_over = true;
+
+    // inversion-age event
+    if (p->inv_age > 0) {
+        events.push_back({ double(p->inv_age), 0, 0.0, {} });
+    }
+
+    // sort all events by their time
+    sort(events.begin(), events.end(),
+         [](auto &a, auto &b){
+             if (a.time != b.time) return a.time < b.time;
+             return a.type  > b.type;    // demography (2) comes before speciation (1)
+         });
+
+    // populate worldData vectors
+    for (auto &ev : events) {
+        worldData->epoch_breaks.push_back(ev.time);
+        worldData->epochType.push_back(ev.type);
+        worldData->epochValues.push_back(ev.value);
+        worldData->epochPopSizes.push_back(ev.popSizes);
+    }
+
+    worldData->epochs_over = worldData->epoch_breaks.empty();
+
 
     Context originCtx(0,0);
 	worldData->originCtx=originCtx;

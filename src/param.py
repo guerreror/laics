@@ -4,126 +4,123 @@ import yaml
 import demes
 import subprocess
 import argparse
+import json
 
 # Default file names for the YAML files.
-OTHER_YAML = "src/other.yaml"
-DEMES_YAML = "src/demes.yaml"
+OTHER_YAML      = "src/other.yaml"
+DEMES_YAML      = "src/demes.yaml"
+DEMOGRAPHY_JSON = "src/demo_dict.json"   # your sparse‐demography map
 
-# The default parameters dictionary (its structure remains unchanged)
+# The default parameters dictionary
 parameters = {
-    "seed": "1",
-    "nruns": "1",
+    "seed":         "1",
+    "nruns":        "1",
     "kingman_coal": "1",
-    "drift_sim": "0",
-    "msOutput": "1",
-    "popSizeVec": "10000 10000",
-    "inv_freq": "0.2 0.4",
-    "speciation": "1 10000 0.2",
-    "demography": "0 0 0",
-    "inv_age": "0",
-    "migRate": "0.02",
-    "BasesPerMorgan": "1e8",
-    "randPhi": "0",
-    "phi": "0.2",
-    "invRange": "0 1e3",
-    "fixedSNPs": "1 10 1e-6",
-    "n_SNPs": "0",
+    "drift_sim":    "0",
+    "msOutput":     "1",
+    "popSizeVec":   "10000 10000",
+    "inv_freq":     "0.2 0.4",
+    "speciation":   "1 1000 0.3 2000 0.5 3000 0.8",
+    "demography":   "0 0 0",             # placeholder, will be overridden by JSON
+    "inv_age":      "0",
+    "migRate":      "0.02",
+    "BasesPerMorgan":"1e8",
+    "randPhi":      "0",
+    "phi":          "0.2",
+    "invRange":     "0 1e3",
+    "fixedSNPs":    "1 10 1e-6",
+    "n_SNPs":       "0",
     "snpPositions": "500 550 600 650 700 750 800 850 900 950",
     "randomSample": "0",
-    "tempRead": "10 0",
-    "nCarriers": "10 0"
+    "tempRead":     "10 0",
+    "nCarriers":    "10 0"
 }
 
-# Load parameters from the YAML files.
+# 1) Load other.yaml
 try:
     with open(OTHER_YAML, 'r') as f:
         other_params = yaml.safe_load(f)
 except Exception as e:
-    print(f"Error loading {OTHER_YAML}: {e}")
+    print(f"Error loading {OTHER_YAML}: {e}", file=sys.stderr)
     sys.exit(1)
 
-# Update the parameters dictionary with values from other.yaml (only for keys not updated from demes.yaml)
+# Override keys except those driven by demes.yaml or JSON
 for key in other_params:
     if key in parameters and key not in ["popSizeVec", "speciation", "migRate"]:
         parameters[key] = str(other_params[key])
 
+# 2) Load demography graph from demes.yaml
 try:
     graph = demes.load(DEMES_YAML)
 except Exception as e:
-    print(f"Error loading {DEMES_YAML}: {e}")
+    print(f"Error loading {DEMES_YAML}: {e}", file=sys.stderr)
     sys.exit(1)
 
-# Update popSizeVec: For each deme except the one named "ancestor", extract the start_size from the first epoch.
+# Update popSizeVec from demes.yaml (all non-ancestor demes)
 pop_sizes = []
 for deme in graph.demes:
     if deme.name != "ancestor":
         pop_sizes.append(str(deme.epochs[0].start_size))
 parameters["popSizeVec"] = " ".join(pop_sizes)
 
-# Update speciation: The format is "1 10000 0". Replace the middle value with the "ancestor" deme’s end_time.
-ancestor_end_time = None
-for deme in graph.demes:
-    if deme.name == "ancestor":
-        ancestor_end_time = deme.epochs[0].end_time
-        break
-if ancestor_end_time is not None:
-    speciation_parts = parameters["speciation"].split()
-    if len(speciation_parts) >= 3:
-        speciation_parts[1] = str(ancestor_end_time)
-        parameters["speciation"] = " ".join(speciation_parts)
-
-# Update migRate: Set it to the migration rate from the first migration (if present) in the YAML.
+# 3) Update migRate from the first migration in demes.yaml
 if graph.migrations:
     parameters["migRate"] = str(graph.migrations[0].rate)
 
-# --- Reintroduce the modify/update parameters function ---
+# 4) Interactive tweak (unchanged)
 def print_parameters(params):
-    for key, value in params.items():
-        print(f"{key}: {value}")
+    for k, v in params.items():
+        print(f"{k}: {v}")
 
 def modify_params(parameters):
     print("Current Parameters:")
     print_parameters(parameters)
-    
-    modify = input("\nDo you want to modify any parameters? (Y/N): ")
-    if modify.lower() == 'y':
+    if input("\nDo you want to modify any parameters? (Y/N): ").lower() == 'y':
         user_input = input("\nEnter parameters to modify (e.g., --seed 2 --nruns 3): ")
         parser = argparse.ArgumentParser()
-        for key in parameters.keys():
-            if key in ["popSizeVec", "inv_freq", "speciation", "demography", "invRange", "fixedSNPs", "tempRead", "nCarriers", "snpPositions"]:
+        for key in parameters:
+            if key in ["popSizeVec","inv_freq","speciation","demography","invRange",
+                       "fixedSNPs","tempRead","nCarriers","snpPositions"]:
                 parser.add_argument(f"--{key}", nargs='+')
             else:
                 parser.add_argument(f"--{key}")
         args = parser.parse_args(user_input.split())
-        
-        for key, value in vars(args).items():
-            if value is not None:
-                if key in ["popSizeVec", "inv_freq", "speciation", "demography", "invRange", "fixedSNPs", "tempRead", "nCarriers", "snpPositions"]:
-                    parameters[key] = " ".join(value)
-                else:
-                    parameters[key] = value
+        for key, val in vars(args).items():
+            if val is not None:
+                parameters[key] = " ".join(val) if isinstance(val, list) else str(val)
         print("\nUpdated Parameters:")
         print_parameters(parameters)
     else:
         print("\nNo changes made.")
 
-# Call modify_params to allow interactive parameter updates.
 modify_params(parameters)
-# --- End modify/update function ---
 
-# Prepare the ordered list of parameters to pass to the C++ executable.
-keys_order = ["seed", "nruns", "kingman_coal", "drift_sim", "msOutput",
-              "popSizeVec", "inv_freq", "speciation", "demography", "inv_age",
-              "migRate", "BasesPerMorgan", "randPhi", "phi", "invRange", "fixedSNPs",
-              "n_SNPs", "snpPositions", "randomSample", "tempRead", "nCarriers"]
+try:
+    with open(DEMOGRAPHY_JSON, 'r') as f:
+        demog_map = json.load(f)
+except FileNotFoundError:
+    demog_map = {}
 
-args_list = [parameters[key] for key in keys_order]
+if demog_map:
+    demog_entries = ["1"]
+    for t_str, sizes in sorted(demog_map.items(), key=lambda kv: float(kv[0])):
+        demog_entries.append(t_str)
+        demog_entries += [str(int(x)) for x in sizes]
+    parameters["demography"] = " ".join(demog_entries)
+
+keys_order = [
+    "seed","nruns","kingman_coal","drift_sim","msOutput",
+    "popSizeVec","inv_freq","speciation","demography","inv_age",
+    "migRate","BasesPerMorgan","randPhi","phi","invRange","fixedSNPs",
+    "n_SNPs","snpPositions","randomSample","tempRead","nCarriers"
+]
+args_list = [parameters[k] for k in keys_order]
 
 print("\nFinal parameters being passed:")
-for key in keys_order:
-    print(f"{key}: {parameters[key]}")
+for k in keys_order:
+    print(f"{k}: {parameters[k]}")
 
-# Run the C++ executable (assumed to be located at "./executables/labp_v19").
+# 7) Invoke the C++ executable
 command = ["./executables/labp_v19"] + args_list
 result = subprocess.run(command, capture_output=True, text=True)
 
