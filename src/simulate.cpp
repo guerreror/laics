@@ -189,6 +189,12 @@ bool World::timeCheck(double waiting, double Rate){
 }
 
 void World::updateToNextEpoch(){
+    int out = worldData->current_epoch;
+    std::cerr << "*** updateToNextEpoch() called for epoch " << out
+              << " (time=" << worldData->epoch_breaks[out]
+              << ", type=" << worldData->epochType[out] << ")\n";
+
+
     int outof_epoch = worldData->current_epoch;
     int into_epoch = worldData->current_epoch + 1;
     worldData->generation = worldData->epoch_breaks[outof_epoch];
@@ -240,46 +246,74 @@ void World::demoChange() {
 
 
 
-
 void World::speciation() {
-    // get new ancestor frequency for this event
-    double newFreq = worldData->epochValues[worldData->current_epoch];
+    unsigned int A       = worldData->epochPopSizes[worldData->current_epoch][0];
+    unsigned int B       = worldData->epochPopSizes[worldData->current_epoch][1];
+    double       newFreq = worldData->epochValues[worldData->current_epoch];
 
-    // move all non-ancestor carriers into pop 0
-    vector<shared_ptr<Chromosome>> migrants;
+    size_t beforeA = popNcarriers(A);
+    size_t beforeB = popNcarriers(B);
+    std::cerr << "[Speciation] BEFORE merge: pop " 
+              << A << "=" << beforeA << " carriers, pop "
+              << B << "=" << beforeB << " carriers\n";
+
+    worldData->popSize[A] += worldData->popSize[B];
+    worldData->popSize.erase(worldData->popSize.begin() + B);
+    worldData->nPops = worldData->popSize.size();
+
+
+    vector< shared_ptr<Chromosome> > allChr;
+    for (auto &vec : *worldData->carriers)
+        for (auto &chr : vec)
+            allChr.push_back(chr);
+
+    for (auto &chr : allChr) {
+        if (chr->getContext().pop == B)
+            chr->setPopulation(A);
+    }
+
+    
+    std::cerr << "Clusters beforeee:\n";
+    for (auto &kv : cluster) {
+        std::cerr << "  pop=" << kv.first.pop
+                  << ", inv=" << kv.first.inversion
+                  << " -> cid=" << kv.second << "\n";
+    }
+
+    rebuildClustersAndCarriers();
+    std::cerr << "Clusters now:\n";
+    for (auto &kv : cluster) {
+        std::cerr << "  pop=" << kv.first.pop
+                  << ", inv=" << kv.first.inversion
+                  << " -> cid=" << kv.second << "\n";
+    }
+    worldData->freq.resize(worldData->nClust);
+
+
     for (auto &kv : cluster) {
         const Context &ctx = kv.first;
         int cid = kv.second;
-        if (ctx.pop != 0 && ctxtNcarriers(ctx) > 0) {
-            for (int i = 0; i < ctxtNcarriers(ctx); ++i) {
-                auto chr = worldData->carriers->at(cid)[i];
-                chr->setPopulation(0);
-                migrants.push_back(chr);
-            }
-            worldData->carriers->at(cid).clear();
-        }
-    }
-    if (!migrants.empty()) {
-        for (auto &chr : migrants) {
-            auto newNode = make_shared<ARGNode>(worldData->argNodeVec.size(),
-                                                chr, worldData->generation);
-            worldData->argNodeVec.push_back(newNode);
-            chr->setDescendant(newNode);
-            worldData->carriers->at(cluster[chr->getContext()]).push_back(chr);
+        if (ctx.pop == A) {
+            worldData->freq[cid] = ctx.inversion
+                                 ? newFreq
+                                 : 1.0 - newFreq;
         }
     }
 
-    // update frequencies: ancestor contexts get newFreq, others zero
-    for (auto &kv : cluster) {
-        const Context &ctx = kv.first;
-        int cid = kv.second;
-        if (ctx.pop == 0) {
-            worldData->freq[cid] = (ctx.inversion == 1 ? newFreq : 1 - newFreq);
-        } else {
-            worldData->freq[cid] = 0.0;
-        }
-    }
+    size_t afterA = popNcarriers(A);
+    size_t afterB = popNcarriers(B);  
+    std::cerr << "[Speciation] AFTER  merge: pop "
+              << A << "=" << afterA << " carriers, pop "
+              << B << "=" << afterB << " carriers\n";
+
+    std::cerr << "[Speciation] pop " << B << "→" << A
+              << "; popSizes = ";
+    for (auto s : worldData->popSize) std::cerr << s << " ";
+    std::cerr << "; nClust=" << worldData->nClust
+              << "\n";
 }
+
+
 
 
 void World::freqStepToLoss(){

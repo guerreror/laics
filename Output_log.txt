@@ -1,12 +1,12 @@
-Random Seed: 1679929803
+Random Seed: 2651221739
 Input Seed: 1
 Number of runs: 1
 Assuming Kingman? 1
 Simulating drift? 0
 Output each set in ms format? 1
 Population Sizes: 0 = 10000 | 1 = 10000 | 2 = 10000 | 
-Frequencies of inverted chromosomes: 0 = 0.2 | 1 = 0.4 | 2 = 0.1 | 
-Speciation time: 1000
+Frequencies of inverted chromosomes: 0 = 0.2 | 1 = 0.3 | 2 = 0.4 | 
+Speciation MERGE: pop2→pop0 at t=1000 with inv‑freq=0.3
 Demography change time: 1000
 Reminder: this coeff multiplies all pop sizes in the preceding epoch
 Age of inversion = 0
@@ -22,11 +22,40 @@ Random sample of carriers? 0
 Sample in Pop 0: 10 0 
 Sample in Pop 1: 10 0 
 Sample in Pop 2: 10 0 
+>>> Epoch breaks: 1000 1000 2000 
+>>> Epoch types:  2 1 1 
+*** updateToNextEpoch() called for epoch 0 (time=1000, type=2)
 [demoChange] generation 1000: resulting popSizes = 4500 10000 10000 
-[demoChange] generation 2000: resulting popSizes = 4500 5500 10000 
-[demoChange] generation 3000: resulting popSizes = 4500 5500 6500 
+*** updateToNextEpoch() called for epoch 1 (time=1000, type=1)
+[Speciation] BEFORE merge: pop 0=54 carriers, pop 2=63 carriers
+Clusters beforeee:
+  pop=0, inv=0 -> cid=0
+  pop=0, inv=1 -> cid=1
+  pop=1, inv=0 -> cid=2
+  pop=1, inv=1 -> cid=3
+  pop=2, inv=0 -> cid=4
+  pop=2, inv=1 -> cid=5
+Clusters now:
+  pop=0, inv=0 -> cid=0
+  pop=0, inv=1 -> cid=1
+  pop=1, inv=0 -> cid=2
+  pop=1, inv=1 -> cid=3
+[Speciation] AFTER  merge: pop 0=117 carriers, pop 2=0 carriers
+[Speciation] pop 2→0; popSizes = 14500 10000 ; nClust=4
+*** updateToNextEpoch() called for epoch 2 (time=2000, type=1)
+[Speciation] BEFORE merge: pop 0=89 carriers, pop 1=50 carriers
+Clusters beforeee:
+  pop=0, inv=0 -> cid=0
+  pop=0, inv=1 -> cid=1
+  pop=1, inv=0 -> cid=2
+  pop=1, inv=1 -> cid=3
+Clusters now:
+  pop=0, inv=0 -> cid=0
+  pop=0, inv=1 -> cid=1
+[Speciation] AFTER  merge: pop 0=139 carriers, pop 1=0 carriers
+[Speciation] pop 1→0; popSizes = 24500 ; nClust=2
 
-Mean LD (E[T1,n]) = 0.0766786
+Mean LD (E[T1,n]) = 1.5243
 Mean TMRCA per site (E[T1]...E[Tn])
- 0.255838 0.23491 0.182284 0.272387 0.357509 0.454356 0.215828 0.231223 0.262175 0.299715
-Elapsed time: 1.55143s
+ 1.3716 3.70641 1.20721 1.74693 2.23081 0.850762 0.74905 0.719949 1.43263 1.11133
+Elapsed time: 4.66228s

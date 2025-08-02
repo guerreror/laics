@@ -18,9 +18,9 @@ parameters = {
     "kingman_coal": "1",
     "drift_sim":    "0",
     "msOutput":     "1",
-    "popSizeVec":   "10000 10000",
-    "inv_freq":     "0.2 0.4",
-    "speciation":   "1 1000 0.3 2000 0.5 3000 0.8",
+    "popSizeVec":   "10000 10000 10000",
+    "inv_freq":     "0.2 0.3 0.4",
+    "speciation":   "1 0 2 1000 0.3 0 1 2000 0.2",
     "demography":   "0 0 0",             # placeholder, will be overridden by JSON
     "inv_age":      "0",
     "migRate":      "0.02",

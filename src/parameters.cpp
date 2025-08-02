@@ -98,22 +98,24 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
     std::cerr << '\n';
 
     // Speciation (param_vec[6])
+    // Speciation (flag + sinkPop + sourcePop + time + freq)
     iss.clear();
     iss.str(param_vec[6]);
     paramData->speciation = vector<double>(std::istream_iterator<double>(iss), std::istream_iterator<double>());
-    if (paramData->speciation.at(0) == 1)
-    {
-        if (paramData->speciation.size() < 3)
-        {
-            std::cerr << "Error; Simulating speciation but no time or invFreq parameters found\n";
-            exit(1);
-        }
-        std::cerr << "Speciation time: " << paramData->speciation.at(1) << "\n";
-    }
-    else
-    {
+    if (paramData->speciation.size() >= 5 && paramData->speciation[0] == 1) {
+        unsigned sink   = (unsigned)paramData->speciation[1];
+        unsigned source = (unsigned)paramData->speciation[2];
+        double   t      = paramData->speciation[3];
+        double   f      = paramData->speciation[4];
+        std::cerr << "Speciation MERGE: pop" << source
+                  << "→pop" << sink
+                  << " at t=" << t
+                  << " with inv‑freq=" << f
+                  << "\n";
+    } else {
         std::cerr << "No speciation.\n";
     }
+
 
     // Demography (param_vec[7])
     iss.clear();

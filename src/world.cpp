@@ -30,7 +30,25 @@
 	#include <algorithm>    // for sort()
 
 
-// ================================================================================================================
+void World::rebuildClustersAndCarriers() {
+    // 1. Gather every chromosome into a flat list
+    vector< shared_ptr<Chromosome> > allChr;
+    for (auto &vec : *worldData->carriers)
+        for (auto &chr : vec)
+            allChr.push_back(chr);
+
+    cluster.clear();
+    makecluster(worldData->popSize.size());
+    worldData->nClust = cluster.size();
+
+    worldData->carriers->clear();
+    worldData->carriers->resize(worldData->nClust);
+
+    for (auto &chr : allChr) {
+        int cid = cluster[ chr->getContext() ];
+        worldData->carriers->at(cid).push_back(chr);
+    }
+}
 
 
 World::World(shared_ptr<Parameters::ParameterData> p){	
@@ -73,16 +91,11 @@ World::World(shared_ptr<Parameters::ParameterData> p){
     struct Event { double time; int type; double value; vector<unsigned int> popSizes; };
     vector<Event> events;
 
-    if (p->speciation.at(0) == 1) {
-        for (size_t i = 1; i + 1 < p->speciation.size(); i += 2) {
-            events.push_back({ p->speciation[i], 1, p->speciation[i+1], {} });
-        }
-    }
-
+    // 1) Demography events → type=2
     if (p->demography.at(0) == 1) {
-        size_t np = p->popSizeVec.size();
+        size_t np     = p->popSizeVec.size();
         size_t stride = 1 + np;
-        size_t count = (p->demography.size() - 1) / stride;
+        size_t count  = (p->demography.size() - 1) / stride;
         for (size_t e = 0; e < count; ++e) {
             size_t idx = 1 + e * stride;
             double t = p->demography[idx];
@@ -93,6 +106,18 @@ World::World(shared_ptr<Parameters::ParameterData> p){
             events.push_back({ t, 2, 0.0, sizes });
         }
     }
+
+    // --- speciation parsing (new 1 A B T F format) ---
+	if (p->speciation.at(0) == 1) {
+		for (size_t i = 1; i + 3 < p->speciation.size(); i += 4) {
+			unsigned int A = (unsigned int)p->speciation[i];      // sink population
+			unsigned int B = (unsigned int)p->speciation[i+1];    // source population to merge
+			double       T =        p->speciation[i+2];          // event time
+			double       F =        p->speciation[i+3];          // new inversion frequency
+			events.push_back({ T, 1, F, { A, B } });
+		}
+	}
+
 
     // inversion-age event
     if (p->inv_age > 0) {
@@ -147,6 +172,14 @@ World::World(shared_ptr<Parameters::ParameterData> p){
     
     
     worldData->generation=1.0;
+
+	// debug: what epochs do we have?
+	std::cerr << ">>> Epoch breaks: ";
+	for (double t : worldData->epoch_breaks) std::cerr << t << " ";
+	std::cerr << "\n>>> Epoch types:  ";
+	for (unsigned ty : worldData->epochType)   std::cerr << ty << " ";
+	std::cerr << "\n";
+
 } // End constructor for World
 
 

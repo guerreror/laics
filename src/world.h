@@ -79,6 +79,7 @@ public:
     void updateToNextEpoch();
     void demoChange();
     void speciation();
+	void rebuildClustersAndCarriers();
 	shared_ptr< Chromosome> recomb_Wrap(shared_ptr<Chromosome> chrom, bool hetero, bool gflux);
     vector< shared_ptr < ARGNode > > initialARGnodes; //public vector of pointers to the original ARG nodes. For use in output of sample
     
@@ -113,6 +114,7 @@ struct World::WorldData		// Structure with the private data for World, accessed 
 	// for multi-time speciation/demography support:
 	vector<double>                epochValues;    // speciation frequencies or placeholder
 	vector<vector<unsigned int>>  epochPopSizes;  // explicit pop-size vectors for demography
+	
 
     //CCD changes imported from sexCoal
     //vector<double> recomb_breakpoints;

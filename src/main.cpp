@@ -242,8 +242,10 @@ int main(int argc, const char *argv[])
                   << pi << " " << piP1 << " " << piP2 << " " 
                   << fst << " " << dxy << " " << tajd(nCarriers, varSites, pi) << "\n";
         }
+
         delete world;
     } // end main simulation loop
+    
 
     std::cerr.precision(6);
     std::cerr << "\nMean LD (E[T1,n]) = " << LDsum / (double)nRuns << "\n";
