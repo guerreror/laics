@@ -247,71 +247,101 @@ void World::demoChange() {
 
 
 void World::speciation() {
+    // A = sink, B = source to merge
     unsigned int A       = worldData->epochPopSizes[worldData->current_epoch][0];
     unsigned int B       = worldData->epochPopSizes[worldData->current_epoch][1];
     double       newFreq = worldData->epochValues[worldData->current_epoch];
 
+    // Snapshot old cluster & freqs BEFORE we change anything
+    const auto oldCluster = cluster;
+    const auto oldFreq    = worldData->freq;
+
+    // Debug
     size_t beforeA = popNcarriers(A);
     size_t beforeB = popNcarriers(B);
-    std::cerr << "[Speciation] BEFORE merge: pop " 
+    std::cerr << "[Speciation] BEFORE merge: pop "
               << A << "=" << beforeA << " carriers, pop "
               << B << "=" << beforeB << " carriers\n";
 
+    // 1) Merge sizes and erase B
     worldData->popSize[A] += worldData->popSize[B];
     worldData->popSize.erase(worldData->popSize.begin() + B);
-    worldData->nPops = worldData->popSize.size();
 
+    // After erasing B, indices > B shift down by 1.
+    unsigned int newA = (A > B) ? (A - 1) : A;
 
-    vector< shared_ptr<Chromosome> > allChr;
+    // 2) Relabel all chromosomes:
+    //    - B -> newA
+    //    - any pop > B -> pop-1
+    std::vector< std::shared_ptr<Chromosome> > allChr;
     for (auto &vec : *worldData->carriers)
         for (auto &chr : vec)
             allChr.push_back(chr);
 
     for (auto &chr : allChr) {
-        if (chr->getContext().pop == B)
-            chr->setPopulation(A);
+        int p = chr->getContext().pop;
+        if      (p == (int)B) chr->setPopulation(newA);
+        else if (p  > (int)B) chr->setPopulation(p - 1);
+        // else p < B: unchanged
     }
 
-    
-    std::cerr << "Clusters beforeee:\n";
+        // --- DEBUG: clusters BEFORE rebuild ---
+    std::cerr << "Clusters BEFORE rebuild:\n";
     for (auto &kv : cluster) {
         std::cerr << "  pop=" << kv.first.pop
-                  << ", inv=" << kv.first.inversion
-                  << " -> cid=" << kv.second << "\n";
-    }
+                << ", inv=" << kv.first.inversion
+                << " -> cid=" << kv.second << "\n";
+}
 
+
+    // 3) Rebuild clusters and carrier buckets
     rebuildClustersAndCarriers();
-    std::cerr << "Clusters now:\n";
+
+        // --- DEBUG: clusters AFTER rebuild ---
+    std::cerr << "Clusters AFTER rebuild:\n";
     for (auto &kv : cluster) {
         std::cerr << "  pop=" << kv.first.pop
-                  << ", inv=" << kv.first.inversion
-                  << " -> cid=" << kv.second << "\n";
+                << ", inv=" << kv.first.inversion
+                << " -> cid=" << kv.second << "\n";
     }
-    worldData->freq.resize(worldData->nClust);
-
-
+    // 4) Rebuild freq vector:
+    //    - set merged pop (newA) to newFreq / (1-newFreq)
+    //    - copy others from oldFreq, accounting for the removed B
+    std::vector<double> newFreqVec(worldData->nClust, 0.0);
     for (auto &kv : cluster) {
-        const Context &ctx = kv.first;
-        int cid = kv.second;
-        if (ctx.pop == A) {
-            worldData->freq[cid] = ctx.inversion
-                                 ? newFreq
-                                 : 1.0 - newFreq;
+        const Context &ctxNew = kv.first;
+        int cidNew = kv.second;
+
+        if (ctxNew.pop == (int)newA) {
+            newFreqVec[cidNew] = ctxNew.inversion ? newFreq : (1.0 - newFreq);
+        } else {
+            int oldPop = ctxNew.pop;
+            if (oldPop >= (int)B) oldPop += 1;  // map new index -> old index
+            Context ctxOld(oldPop, ctxNew.inversion);
+            auto itOld = oldCluster.find(ctxOld);
+            if (itOld != oldCluster.end()) {
+                newFreqVec[cidNew] = oldFreq[itOld->second];
+            } else {
+                // shouldn't happen; keep 0
+            }
         }
     }
+    worldData->freq.swap(newFreqVec);
 
-    size_t afterA = popNcarriers(A);
-    size_t afterB = popNcarriers(B);  
+    worldData->nPops = worldData->popSize.size();
+
+    size_t afterA = popNcarriers(newA);
+    size_t afterB = (B < worldData->nPops) ? popNcarriers(B) : 0;
+
     std::cerr << "[Speciation] AFTER  merge: pop "
-              << A << "=" << afterA << " carriers, pop "
-              << B << "=" << afterB << " carriers\n";
+              << newA << "=" << afterA << " carriers, pop "
+              << B   << "=" << afterB << " carriers\n";
 
-    std::cerr << "[Speciation] pop " << B << "→" << A
-              << "; popSizes = ";
+    std::cerr << "[Speciation] pop " << B << "→" << newA << "; popSizes = ";
     for (auto s : worldData->popSize) std::cerr << s << " ";
-    std::cerr << "; nClust=" << worldData->nClust
-              << "\n";
+    std::cerr << " ; nClust=" << worldData->nClust << "\n";
 }
+
 
 
 

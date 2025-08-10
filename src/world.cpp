@@ -31,24 +31,35 @@
 
 
 void World::rebuildClustersAndCarriers() {
-    // 1. Gather every chromosome into a flat list
-    vector< shared_ptr<Chromosome> > allChr;
+    // Gather all chromosomes
+    std::vector< std::shared_ptr<Chromosome> > allChr;
+    allChr.reserve(totalNCarriers());
     for (auto &vec : *worldData->carriers)
         for (auto &chr : vec)
             allChr.push_back(chr);
 
+    // Rebuild cluster map
     cluster.clear();
     makecluster(worldData->popSize.size());
     worldData->nClust = cluster.size();
 
-    worldData->carriers->clear();
-    worldData->carriers->resize(worldData->nClust);
+    // Reset carriers buckets
+    worldData->carriers->assign(worldData->nClust, {});
 
+    // Reassign carriers to new clusters
     for (auto &chr : allChr) {
-        int cid = cluster[ chr->getContext() ];
+        auto it = cluster.find(chr->getContext());
+        if (it == cluster.end()) {
+            std::cerr << "[rebuildClustersAndCarriers] ERROR: unknown context after relabel: "
+                      << "pop=" << chr->getContext().pop
+                      << " inv=" << chr->getContext().inversion << "\n";
+            continue; // or assert(false);
+        }
+        int cid = it->second;
         worldData->carriers->at(cid).push_back(chr);
     }
 }
+
 
 
 World::World(shared_ptr<Parameters::ParameterData> p){	
