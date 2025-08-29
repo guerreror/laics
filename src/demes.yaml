@@ -59,7 +59,6 @@ demes:
       - end_time: 0
         start_size: 1200
 
-# Pairwise migrations among present-day pops (optional)
 migrations:
   - demes: [pop0, pop1]
     rate: 0.02

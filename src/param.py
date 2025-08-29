@@ -324,7 +324,6 @@ def modify_params(parameters):
 
 modify_params(parameters)
 
-# Re-impose demes-derived fields (in case user tried to override)
 parameters["popSizeVec"] = pop_sizes_str
 parameters["speciation"] = speciation_str
 
