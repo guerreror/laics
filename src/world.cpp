@@ -118,16 +118,34 @@ World::World(shared_ptr<Parameters::ParameterData> p){
         }
     }
 
-    // --- speciation parsing (new 1 A B T F format) ---
-	if (p->speciation.at(0) == 1) {
-		for (size_t i = 1; i + 3 < p->speciation.size(); i += 4) {
-			unsigned int A = (unsigned int)p->speciation[i];      // sink population
-			unsigned int B = (unsigned int)p->speciation[i+1];    // source population to merge
-			double       T =        p->speciation[i+2];          // event time
-			double       F =        p->speciation[i+3];          // new inversion frequency
-			events.push_back({ T, 1, F, { A, B } });
+    // --- speciation parsing (new 1 A B T F R format; backward compatible) ---
+	if (!p->speciation.empty() && p->speciation.at(0) == 1) {
+		// Prefer new stride = 5 (A,B,T,F,R). If only 4 fields remain, treat like legacy (A,B,T,F) with no R.
+		size_t i = 1;
+		while (i < p->speciation.size()) {
+			if (i + 4 < p->speciation.size()) {
+				// New format with R
+				unsigned int A = (unsigned int)p->speciation[i];
+				unsigned int B = (unsigned int)p->speciation[i+1];
+				double       T =               p->speciation[i+2];
+				double       F =               p->speciation[i+3];
+				unsigned int R = (unsigned int)p->speciation[i+4];
+				events.push_back({ T, 1, F, { A, B, R } });
+				i += 5;
+			} else if (i + 3 < p->speciation.size()) {
+				// Legacy format (no R)
+				unsigned int A = (unsigned int)p->speciation[i];
+				unsigned int B = (unsigned int)p->speciation[i+1];
+				double       T =               p->speciation[i+2];
+				double       F =               p->speciation[i+3];
+				events.push_back({ T, 1, F, { A, B } });
+				i += 4;
+			} else {
+				break; // trailing junk; ignore
+			}
 		}
 	}
+
 
 
     // inversion-age event

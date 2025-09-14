@@ -49,8 +49,11 @@ demes:
     start_time: 3000
     ancestors: [ancestor2]
     epochs:
-      - end_time: 0
-        start_size: 1100
+      - start_size: 4000
+        end_time: 1000
+      - start_size: 4000
+        end_size: 1100
+        end_time: 0
 
   - name: pop2
     start_time: 5000

@@ -247,33 +247,46 @@ void World::demoChange() {
 
 
 void World::speciation() {
-    // A = sink, B = source to merge
-    unsigned int A       = worldData->epochPopSizes[worldData->current_epoch][0];
-    unsigned int B       = worldData->epochPopSizes[worldData->current_epoch][1];
-    double       newFreq = worldData->epochValues[worldData->current_epoch];
+    // Epoch payload: [A, B, (optional R)]
+    const auto& payload = worldData->epochPopSizes[worldData->current_epoch];
+    if (payload.size() < 2) {
+        std::cerr << "[Speciation] ERROR: event payload too short.\n";
+        return;
+    }
+    unsigned int A = payload[0]; // sink
+    unsigned int B = payload[1]; // source
+    double newFreq = worldData->epochValues[worldData->current_epoch];
+
+    bool hasR = (payload.size() >= 3);
+    unsigned int R = hasR ? payload[2] : 0;
 
     // Snapshot old cluster & freqs BEFORE we change anything
     const auto oldCluster = cluster;
     const auto oldFreq    = worldData->freq;
 
-    // Debug
+    // Debug (before we erase B)
     size_t beforeA = popNcarriers(A);
     size_t beforeB = popNcarriers(B);
     std::cerr << "[Speciation] BEFORE merge: pop "
               << A << "=" << beforeA << " carriers, pop "
               << B << "=" << beforeB << " carriers\n";
 
-    // 1) Merge sizes and erase B
-    worldData->popSize[A] += worldData->popSize[B];
+    if (hasR) {
+        std::cerr << "[Speciation] Using result size R=" << R << " from demes.\n";
+        worldData->popSize[A] = R;
+    } else {
+        std::cerr << "[Speciation] No result size provided; using A += B fallback.\n";
+        worldData->popSize[A] += worldData->popSize[B];
+    }
     worldData->popSize.erase(worldData->popSize.begin() + B);
 
-    // After erasing B, indices > B shift down by 1.
     unsigned int newA = (A > B) ? (A - 1) : A;
 
     // 2) Relabel all chromosomes:
     //    - B -> newA
     //    - any pop > B -> pop-1
     std::vector< std::shared_ptr<Chromosome> > allChr;
+    allChr.reserve(totalNCarriers());
     for (auto &vec : *worldData->carriers)
         for (auto &chr : vec)
             allChr.push_back(chr);
@@ -285,25 +298,25 @@ void World::speciation() {
         // else p < B: unchanged
     }
 
-        // --- DEBUG: clusters BEFORE rebuild ---
+    // --- DEBUG: clusters BEFORE rebuild (map still reflects old layout) ---
     std::cerr << "Clusters BEFORE rebuild:\n";
     for (auto &kv : cluster) {
         std::cerr << "  pop=" << kv.first.pop
-                << ", inv=" << kv.first.inversion
-                << " -> cid=" << kv.second << "\n";
-}
-
+                  << ", inv=" << kv.first.inversion
+                  << " -> cid=" << kv.second << "\n";
+    }
 
     // 3) Rebuild clusters and carrier buckets
     rebuildClustersAndCarriers();
 
-        // --- DEBUG: clusters AFTER rebuild ---
+    // --- DEBUG: clusters AFTER rebuild ---
     std::cerr << "Clusters AFTER rebuild:\n";
     for (auto &kv : cluster) {
         std::cerr << "  pop=" << kv.first.pop
-                << ", inv=" << kv.first.inversion
-                << " -> cid=" << kv.second << "\n";
+                  << ", inv=" << kv.first.inversion
+                  << " -> cid=" << kv.second << "\n";
     }
+
     // 4) Rebuild freq vector:
     //    - set merged pop (newA) to newFreq / (1-newFreq)
     //    - copy others from oldFreq, accounting for the removed B
@@ -321,8 +334,6 @@ void World::speciation() {
             auto itOld = oldCluster.find(ctxOld);
             if (itOld != oldCluster.end()) {
                 newFreqVec[cidNew] = oldFreq[itOld->second];
-            } else {
-                // shouldn't happen; keep 0
             }
         }
     }
@@ -341,7 +352,6 @@ void World::speciation() {
     for (auto s : worldData->popSize) std::cerr << s << " ";
     std::cerr << " ; nClust=" << worldData->nClust << "\n";
 }
-
 
 
 
