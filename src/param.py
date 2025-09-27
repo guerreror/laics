@@ -4,7 +4,6 @@ import yaml
 import demes
 import subprocess
 import argparse
-import json
 import re
 import random
 from collections import defaultdict, deque
@@ -12,7 +11,6 @@ from collections import defaultdict, deque
 # ---------- File paths ----------
 OTHER_YAML      = "src/other.yaml"
 DEMES_YAML      = "src/demes.yaml"
-DEMOGRAPHY_JSON = "src/demo_dict.json"   
 EXECUTABLE      = "./executables/labp_v19"
 
 # ---------- Defaults ----------
@@ -22,10 +20,11 @@ parameters = {
     "kingman_coal": "1",
     "drift_sim":    "0",
     "msOutput":     "1",
-    "popSizeVec":   "10000 10000 10000 10000",
-    "inv_freq":     "0.2 0.3 0.4",
-    "speciation":   "1 0 2 1000 0.3",
-    "demography":   "0 0 0",             # placeholder; may be overridden by JSON
+    # popSizeVec/speciation/demography are derived below from demes.yaml
+    "popSizeVec":   "1000 1000",
+    "inv_freq":     "0.2 0.3",              # leaves' initial inversion freqs (one per present-day pop)
+    "speciation":   "0 0 0",
+    "demography":   "0 0 0",
     "inv_age":      "0",
     "migRate":      "0.02",
     "BasesPerMorgan":"1e8",
@@ -45,13 +44,14 @@ def epoch_start_size(epoch):
     return int(epoch.start_size)
 
 def leaf_demes(graph):
-    return [d for d in graph.demes if d.epochs[-1].end_time == 0]
+    # present-day demes: last epoch must end at 0
+    return [d for d in graph.demes if d.epochs and d.epochs[-1].end_time == 0]
 
 def pop_index_order(leaves):
+    # sort pop-like names numerically: pop0, pop1, …; others after
     def keyfn(name):
         m = re.fullmatch(r"pop(\d+)", name)
-        if m:
-            return (0, int(m.group(1)))
+        if m: return (0, int(m.group(1)))
         return (1, name)
     names = sorted([d.name for d in leaves], key=keyfn)
     return {name: i for i, name in enumerate(names)}
@@ -62,12 +62,12 @@ def build_children_map(graph):
         if getattr(d, "ancestors", None):
             if len(d.ancestors) > 1:
                 raise NotImplementedError(
-                    f"Admixture not supported for speciation parsing (deme={d.name}, ancestors={d.ancestors})"
+                    f"Admixture is not supported for this parser (deme={d.name}, ancestors={d.ancestors})."
                 )
             parent = d.ancestors[0]
             children[parent].append(d.name)
-    # deterministic ordering
     for p in children:
+        # deterministic: leaf-like labels last component numeric ordering
         children[p].sort(key=lambda x: (x.startswith("pop"), x))
     return children
 
@@ -105,9 +105,8 @@ def fmt_time(x):
 
 def ancestor_size_at(deme, T):
     """
-    Return the parent's epoch start_size at the split time T.
-    Prefer an epoch whose end_time == T; otherwise choose the first
-    epoch with end_time > T.
+    Return the parent's epoch start_size at split time T.
+    Prefer an epoch whose end_time == T; otherwise the first with end_time > T.
     """
     eps = 1e-9
     for ep in deme.epochs:
@@ -116,13 +115,10 @@ def ancestor_size_at(deme, T):
     for ep in deme.epochs:
         if ep.end_time > T:
             return int(ep.start_size)
-    # Fallback to the last epoch's start_size (shouldn't happen in well-formed graphs)
+    # fallback
     return int(deme.epochs[-1].start_size)
 
 def render_tree_ascii(graph, only_these_leaves=None):
-    """
-    Pretty-print tree (past -> present) with connectors.
-    """
     children = build_children_map(graph)
     root = pick_root(graph)
     by_name = {d.name: d for d in graph.demes}
@@ -152,14 +148,16 @@ def render_tree_ascii(graph, only_these_leaves=None):
     dfs(root)
     return "\n".join(lines)
 
-def build_speciation_from_demes(graph, ancestor_freqs=None):
+# ---------- Speciation (sizes + events) ----------
+def build_speciation_from_demes(graph, ancestor_freqs=None, default_F=0.2):
     """
     Build:
-      - pop_sizes_str: "N0 N1 N2 ..."
+      - pop_sizes_str: "N0 N1 ... (current leaf sizes at end_time=0)"
       - speciation_str: "1 A B T F R A B T F R ..."
-      - debug_info: dict
-    If ancestor_freqs is provided (dict: parent_name -> F), use it for F.
-    Otherwise fall back to random choices in {0.1,0.2,0.3,0.4,0.5}.
+      - debug_info: dict with leaf order, events, and plan logs
+
+    A,B are CURRENT group indices at time T (pre-merge state); R is the resulting
+    size from the parent's epoch at T; F is the inversion frequency for the merged group.
     """
     leaves = leaf_demes(graph)
     if not leaves:
@@ -167,7 +165,7 @@ def build_speciation_from_demes(graph, ancestor_freqs=None):
     idx_map = pop_index_order(leaves)
     leaf_names_in_order = [name for name, _ in sorted(idx_map.items(), key=lambda kv: kv[1])]
 
-    # Present-day sizes in our index order
+    # Present-day sizes in that order (from the last epoch)
     sizes = []
     for name in leaf_names_in_order:
         d = next(dd for dd in leaves if dd.name == name)
@@ -175,8 +173,9 @@ def build_speciation_from_demes(graph, ancestor_freqs=None):
 
     children = build_children_map(graph)
     by_name = {d.name: d for d in graph.demes}
+    leafset = set(leaf_names_in_order)
 
-    # active_groups: list of lists of present-day leaf names
+    # Active groups evolve as we "rewind" backward splits to forward merges
     active_groups = [[name] for name in leaf_names_in_order]
 
     def find_group_idx(leaf):
@@ -185,19 +184,17 @@ def build_speciation_from_demes(graph, ancestor_freqs=None):
                 return i
         raise RuntimeError(f"Leaf {leaf} not found in current groups")
 
+    # Internal nodes ordered by earliest child start_time (present-ward first)
     internal_nodes = list(children.keys())
-    # Earliest (present-ward) splits first
     internal_nodes.sort(key=lambda n: min((by_name[c].start_time for c in children[n])), reverse=False)
 
-    default_freqs = [0.1, 0.2, 0.3, 0.4, 0.5]
-    events = []       # (A, B, T, F, R)
+    events = []       # list of (A,B,T,F,R)
     plan_log = []
     groups_log = []
 
-    # Validation helper
     def get_parent_F(parent):
         if ancestor_freqs is None:
-            return random.choice(default_freqs)
+            return float(default_F)
         if parent not in ancestor_freqs:
             raise ValueError(f"ancestor_frequencies is missing a value for internal node '{parent}'")
         F = float(ancestor_freqs[parent])
@@ -208,39 +205,37 @@ def build_speciation_from_demes(graph, ancestor_freqs=None):
     for parent in internal_nodes:
         child_sets = []
         for child in children[parent]:
-            under = leaves_under(child, children, set(leaf_names_in_order))
+            under = leaves_under(child, children, leafset)
             if under:
                 child_sets.append((child, sorted(under)))
         if len(child_sets) < 2:
             continue
 
-        # Event time and resulting size (R comes from the parent’s epoch at that time)
+        # Event time and resulting pop size (R from parent at this split)
         T = min(by_name[ch].start_time for ch, _ in child_sets)
         R = ancestor_size_at(by_name[parent], T)
         F_parent = get_parent_F(parent)
 
-        # Map each child to current group index
+        # Map each child to its current group
         child_group_idxs = []
         for ch, under in child_sets:
             gi = find_group_idx(under[0])
             child_group_idxs.append((gi, ch, under))
 
-        # Use the smallest current index as sink to match our C++ index behavior
+        # Smallest index becomes sink (to mirror C++ index behavior)
         child_group_idxs.sort(key=lambda x: x[0])
         sink_idx = child_group_idxs[0][0]
         sink_child = child_group_idxs[0][1]
 
-        # Pairwise fold-in of the remaining children into the sink
+        # Fold the rest into the sink
         for gi, ch, under in child_group_idxs[1:]:
             A = sink_idx
             B = gi
-            F = F_parent
-            events.append((A, B, T, F, R))
+            events.append((A, B, T, F_parent, R))
             plan_log.append(
-                f"t={fmt_time(T)}: merge group {B} ({ch}:{under}) → group {A} ({sink_child}); F={F:g}, R={R}"
+                f"t={fmt_time(T)}: merge group {B} ({ch}:{under}) → group {A} ({sink_child}); F={F_parent:g}, R={R}"
             )
-
-            # Apply merge to groups and log the new mapping
+            # Update active groups & log snapshot
             active_groups[A].extend(active_groups[B])
             del active_groups[B]
             groups_log.append([list(g) for g in active_groups])
@@ -263,6 +258,81 @@ def build_speciation_from_demes(graph, ancestor_freqs=None):
     }
     return pop_sizes_str, speciation_str, debug_info
 
+# ---------- Demography (built from all demes) ----------
+def build_demography_from_demes_full(graph, leaf_order, spec_events):
+    """
+    Build demography from ALL demes (leaves + ancestors).
+
+    For each deme D and each epoch with end_time > 0, at t=end_time emit a size
+    change to the CURRENT group index that represents D at that time (if it exists),
+    setting it to that epoch's start_size.
+
+    Important: demography applies BEFORE speciation at the same time t.
+    So we compute changes using the pre-merge mapping, then apply merges at t.
+    """
+    by_name = {d.name: d for d in graph.demes}
+    npops   = len(leaf_order)
+
+    children = build_children_map(graph)
+    leafset  = set(leaf_order)
+
+    def leaves_under_name(name):
+        return sorted(leaves_under(name, children, leafset))
+
+    # Collect all (t, deme_name, size) for end_time>0
+    demog_records = defaultdict(list)  # t -> list[(deme_name, size)]
+    for d in graph.demes:
+        for ep in d.epochs:
+            if ep.end_time and ep.end_time > 0:
+                demog_records[ep.end_time].append((d.name, int(ep.start_size)))
+
+    if not demog_records:
+        return "0 0 0", []
+
+    # Build merges at time lookup from spec events
+    merges_at_time = defaultdict(list)  # t -> list[(A,B)]
+    for (A, B, T, _, _) in spec_events:
+        merges_at_time[T].append((A, B))
+
+    # Track evolving groups
+    active_groups = [[name] for name in leaf_order]  # list[list[str]]
+
+    def group_index_for_deme(name):
+        target = set(leaves_under_name(name))
+        for i, g in enumerate(active_groups):
+            if set(g) == target:
+                return i
+        return None  # doesn't exist yet in the current mapping
+
+    demog_entries = ["1"]
+    dbg_lines = []
+
+    for t in sorted(demog_records.keys()):
+        sizes = [0] * npops
+        applied = []
+
+        # (1) Apply demography at t using PRE-MERGE mapping
+        for name, sz in demog_records[t]:
+            gi = group_index_for_deme(name)
+            if gi is not None and gi < len(active_groups):
+                sizes[gi] = sz
+                applied.append((gi, name, sz))
+
+        if any(v != 0 for v in sizes[:len(active_groups)]):
+            demog_entries.append(f"{t:g}")
+            demog_entries += [str(v) for v in sizes]
+            # Debug line: show only nonzero assignments
+            applied_str = ", ".join([f"g{gi}({name})={sz}" for gi, name, sz in applied])
+            dbg_lines.append(f"  t={fmt_time(t)}: {applied_str}")
+
+        # (2) Apply all merges scheduled at time t (to match C++ ordering: demography before speciation on ties)
+        for (A, B) in sorted(merges_at_time.get(t, []), key=lambda x: (x[0], x[1])):
+            if A < len(active_groups) and B < len(active_groups):
+                active_groups[A].extend(active_groups[B])
+                del active_groups[B]
+
+    return " ".join(demog_entries), dbg_lines
+
 # ---------- Load other.yaml ----------
 try:
     with open(OTHER_YAML, 'r') as f:
@@ -271,57 +341,56 @@ except Exception as e:
     print(f"Error loading {OTHER_YAML}: {e}", file=sys.stderr)
     sys.exit(1)
 
-# Copy simple keys; leave popSizeVec/speciation to be derived here
+# Copy simple keys (the derived ones will be overwritten later)
 for key in other_params:
     if key in parameters:
         parameters[key] = str(other_params[key])
 
-# Pull ancestor_frequencies (dict) if present
+# ancestor_frequencies (dict: internal node name -> F)
 ancestor_freqs = other_params.get("ancestor_frequencies", None)
 if ancestor_freqs is not None and not isinstance(ancestor_freqs, dict):
     print("Error: 'ancestor_frequencies' in other.yaml must be a mapping (dict).", file=sys.stderr)
     sys.exit(1)
 
-# ---------- Load demes.yaml & derive sizes/speciation/migration ----------
+# Optional default F when ancestor_frequencies not provided
+DEFAULT_ANCESTOR_F = 0.2
+
+# ---------- Load demes.yaml & derive sizes/speciation/migration/demography ----------
 try:
     graph = demes.load(DEMES_YAML)
 except Exception as e:
     print(f"Error loading {DEMES_YAML}: {e}", file=sys.stderr)
     sys.exit(1)
 
+# Speciation & present-day pop sizes
 try:
-    pop_sizes_str, speciation_str, debug_info = build_speciation_from_demes(graph, ancestor_freqs=ancestor_freqs)
+    pop_sizes_str, speciation_str, debug_info = build_speciation_from_demes(
+        graph,
+        ancestor_freqs=ancestor_freqs,
+        default_F=DEFAULT_ANCESTOR_F,
+    )
     parameters["popSizeVec"] = pop_sizes_str
     parameters["speciation"] = speciation_str
-except NotImplementedError as e:
-    print(f"[speciation parser] {e}", file=sys.stderr)
-    sys.exit(1)
-except ValueError as e:
+except (NotImplementedError, ValueError) as e:
     print(f"[speciation parser] {e}", file=sys.stderr)
     sys.exit(1)
 
-# Migration (first rate if present)
+# Demography from demes.yaml (all demes)
+demog_str, demog_dbg = build_demography_from_demes_full(
+    graph,
+    debug_info["leaf_order"],
+    debug_info["events"]
+)
+parameters["demography"] = demog_str
+
+# Migration (take the first rate if present)
 if graph.migrations:
     try:
         parameters["migRate"] = str(graph.migrations[0].rate)
     except Exception:
         pass
 
-# ---------- Optional: sparse demography JSON ----------
-try:
-    with open(DEMOGRAPHY_JSON, 'r') as f:
-        demog_map = json.load(f)
-except FileNotFoundError:
-    demog_map = {}
-
-if demog_map:
-    demog_entries = ["1"]
-    for t_str, sizes in sorted(demog_map.items(), key=lambda kv: float(kv[0])):
-        demog_entries.append(t_str)
-        demog_entries += [str(int(x)) for x in sizes]
-    parameters["demography"] = " ".join(demog_entries)
-
-# ---------- ASCII tree + plan print ----------
+# ---------- Debug prints ----------
 print("\n=== Parsed speciation tree (past → present) ===")
 ascii_tree = render_tree_ascii(graph, only_these_leaves=debug_info["leaf_order"])
 print(ascii_tree)
@@ -341,7 +410,17 @@ if debug_info["events"]:
 else:
     print("  (none)")
 
-# ---------- Allow user tweaks EXCEPT popSizeVec/speciation (derived) ----------
+print("\n=== Demography plan (from demes.yaml) ===")
+if parameters["demography"].startswith("1"):
+    if demog_dbg:
+        for line in demog_dbg:
+            print(line)
+    else:
+        print("  (events exist, but all mapped to times where affected groups didn't yet exist pre-merge)")
+else:
+    print("  (none)")
+
+# ---------- Allow user tweaks EXCEPT derived fields ----------
 def print_parameters(params):
     for k, v in params.items():
         print(f"{k}: {v}")
@@ -351,13 +430,13 @@ def modify_params(parameters):
     print_parameters(parameters)
     ans = input("\nDo you want to modify any parameters? (Y/N): ").strip().lower()
     if ans == 'y':
-        print("(Note: 'popSizeVec' and 'speciation' are derived from demes.yaml and will be ignored if changed.)")
+        print("(Note: 'popSizeVec', 'speciation', and 'demography' are derived from demes.yaml and will be ignored if changed.)")
         user_input = input("\nEnter parameters to modify (e.g., --seed 2 --nruns 3): ")
         parser = argparse.ArgumentParser()
         for key in parameters:
-            if key in ["popSizeVec", "speciation"]:
+            if key in ["popSizeVec", "speciation", "demography"]:
                 continue
-            if key in ["inv_freq","demography","invRange","fixedSNPs","tempRead","nCarriers","snpPositions"]:
+            if key in ["inv_freq","invRange","fixedSNPs","tempRead","nCarriers","snpPositions"]:
                 parser.add_argument(f"--{key}", nargs='+')
             else:
                 parser.add_argument(f"--{key}")
@@ -376,6 +455,7 @@ modify_params(parameters)
 # Re-assert derived values (in case user tried to change them)
 parameters["popSizeVec"] = pop_sizes_str
 parameters["speciation"] = speciation_str
+parameters["demography"] = demog_str
 
 # ---------- Final assembly ----------
 keys_order = [

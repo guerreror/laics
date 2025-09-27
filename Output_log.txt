@@ -1,10 +1,10 @@
-Random Seed: 587986954
+Random Seed: 256479369
 Input Seed: 1
 Number of runs: 1
 Assuming Kingman? 1
 Simulating drift? 0
 Output each set in ms format? 1
-Population Sizes: 0 = 1000 | 1 = 4000 | 2 = 1200 | 3 = 900 | 
+Population Sizes: 0 = 1000 | 1 = 1100 | 2 = 1200 | 3 = 900 | 
 Frequencies of inverted chromosomes: 0 = 0.2 | 1 = 0.3 | 2 = 0.4 | 3 = 0.5 | 
 Speciation MERGE: pop3→pop0 at t=2000 with inv‑freq=0.2
 Demography change time: 1000
@@ -23,12 +23,12 @@ Sample in Pop 0: 10 0
 Sample in Pop 1: 10 0 
 Sample in Pop 2: 10 0 
 Sample in Pop 3: 10 0 
->>> Epoch breaks: 1000 2000 3000 3000 5000 6000 
->>> Epoch types:  2 1 2 1 1 2 
+>>> Epoch breaks: 1000 2000 3000 4000 5000 5500 6000 
+>>> Epoch types:  2 1 1 2 1 2 2 
 *** updateToNextEpoch() called for epoch 0 (time=1000, type=2)
-[demoChange] generation 1000: resulting popSizes = 4500 4000 1200 900 
+[demoChange] generation 1000: resulting popSizes = 1000 4000 1200 900 
 *** updateToNextEpoch() called for epoch 1 (time=2000, type=1)
-[Speciation] BEFORE merge: pop 0=12 carriers, pop 3=7 carriers
+[Speciation] BEFORE merge: pop 0=9 carriers, pop 3=13 carriers
 [Speciation] Using result size R=4000 from demes.
 Clusters BEFORE rebuild:
   pop=0, inv=0 -> cid=0
@@ -46,12 +46,10 @@ Clusters AFTER rebuild:
   pop=1, inv=1 -> cid=3
   pop=2, inv=0 -> cid=4
   pop=2, inv=1 -> cid=5
-[Speciation] AFTER  merge: pop 0=19 carriers, pop 3=0 carriers
+[Speciation] AFTER  merge: pop 0=22 carriers, pop 3=0 carriers
 [Speciation] pop 3→0; popSizes = 4000 4000 1200  ; nClust=6
-*** updateToNextEpoch() called for epoch 2 (time=3000, type=2)
-[demoChange] generation 3000: resulting popSizes = 4000 5000 1200 
-*** updateToNextEpoch() called for epoch 3 (time=3000, type=1)
-[Speciation] BEFORE merge: pop 0=17 carriers, pop 1=23 carriers
+*** updateToNextEpoch() called for epoch 2 (time=3000, type=1)
+[Speciation] BEFORE merge: pop 0=19 carriers, pop 1=15 carriers
 [Speciation] Using result size R=6000 from demes.
 Clusters BEFORE rebuild:
   pop=0, inv=0 -> cid=0
@@ -65,10 +63,12 @@ Clusters AFTER rebuild:
   pop=0, inv=1 -> cid=1
   pop=1, inv=0 -> cid=2
   pop=1, inv=1 -> cid=3
-[Speciation] AFTER  merge: pop 0=40 carriers, pop 1=10 carriers
+[Speciation] AFTER  merge: pop 0=34 carriers, pop 1=13 carriers
 [Speciation] pop 1→0; popSizes = 6000 1200  ; nClust=4
+*** updateToNextEpoch() called for epoch 3 (time=4000, type=2)
+[demoChange] generation 4000: resulting popSizes = 7000 1200 
 *** updateToNextEpoch() called for epoch 4 (time=5000, type=1)
-[Speciation] BEFORE merge: pop 0=31 carriers, pop 1=10 carriers
+[Speciation] BEFORE merge: pop 0=23 carriers, pop 1=10 carriers
 [Speciation] Using result size R=8000 from demes.
 Clusters BEFORE rebuild:
   pop=0, inv=0 -> cid=0
@@ -78,12 +78,14 @@ Clusters BEFORE rebuild:
 Clusters AFTER rebuild:
   pop=0, inv=0 -> cid=0
   pop=0, inv=1 -> cid=1
-[Speciation] AFTER  merge: pop 0=41 carriers, pop 1=0 carriers
+[Speciation] AFTER  merge: pop 0=33 carriers, pop 1=0 carriers
 [Speciation] pop 1→0; popSizes = 8000  ; nClust=2
-*** updateToNextEpoch() called for epoch 5 (time=6000, type=2)
-[demoChange] generation 6000: resulting popSizes = 7000 
+*** updateToNextEpoch() called for epoch 5 (time=5500, type=2)
+[demoChange] generation 5500: resulting popSizes = 9000 
+*** updateToNextEpoch() called for epoch 6 (time=6000, type=2)
+[demoChange] generation 6000: resulting popSizes = 10000 
 
-Mean LD (E[T1,n]) = 5.69326
+Mean LD (E[T1,n]) = 9.22863
 Mean TMRCA per site (E[T1]...E[Tn])
- 1.8063 2.62525 1.73398 1.55109 1.92429 1.42805 1.26535 1.84351 3.73149 3.15189
-Elapsed time: 1.6081s
+ 4.04329 4.0763 1.80569 3.23822 3.66357 9.08996 2.69458 1.80283 6.19331 2.28246
+Elapsed time: 1.14119s
