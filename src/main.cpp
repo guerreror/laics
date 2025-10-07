@@ -37,6 +37,7 @@ using std::weak_ptr;
 #include "sitenode.h"    // SiteNode now includes our new CSV output method.
 #include "snptree.h"
 #include "tajima.h"
+#include "migprob.h"     // <-- NEW: time-scheduled migration matrices
 
 // Global declarations:
 std::random_device rd;
@@ -110,13 +111,34 @@ int main(int argc, const char *argv[])
     // Collect remaining command-line arguments (starting at argv[2]) as parameter strings.
     vector<string> param_vec(argv + 2, argv + argc);
     // Construct Parameters using these values.
-    // (This assumes you have modified the Parameters constructor to accept a vector<string> as a second argument.)
     Parameters params(infile.str().c_str(), param_vec);
 
     unsigned int nRuns = params.paramData->nRuns;
     unsigned int nSites = params.paramData->n_SNPs;
 
-    vector<vector<double>> mig_prob = buildMigMatrix(params);
+
+    const std::string mig_json = "src/migration_matrices.json";
+    auto schedule = readMigrationSchedule(mig_json);
+
+    vector<vector<double>> mig_prob;
+    size_t next_idx = 0;
+
+    if (!schedule.empty()) {
+        double g0 = 0.0;
+        while (next_idx < schedule.size() && schedule[next_idx].first <= g0) {
+            mig_prob = schedule[next_idx].second;
+            ++next_idx;
+        }
+        if (mig_prob.empty()) {
+            mig_prob = schedule.front().second; 
+        }
+        std::cerr << "[mig] loaded " << schedule.size() << " matrices from " << mig_json << "\n";
+    } else {
+        mig_prob = buildMigMatrix(params);
+        std::cerr << "[mig] no JSON; using fallback builder.\n";
+    }
+    // -----------------------------
+
     vector<double> outTime(params.paramData->n_SNPs, 0.0);
 
     ofstream msout, stout;
@@ -146,6 +168,21 @@ int main(int argc, const char *argv[])
         World *world = new World(params.getpData());
         while (!world->simulationFinished())
         {
+            // -----------------------------
+            // NEW: if we have a schedule, switch matrices when generation crosses the next timestamp
+            // -----------------------------
+            if (!schedule.empty() && next_idx < schedule.size()) {
+                double now   = world->nGenerations();
+                double tnext = schedule[next_idx].first;
+                if (now >= tnext) {
+                    mig_prob = schedule[next_idx].second;
+                    ++next_idx;
+                    std::cerr << "[mig] switched matrix @t=" << tnext
+                              << " (rows=" << mig_prob.size() << ")\n";
+                }
+            }
+            // -----------------------------
+
             totalEvents += world->simulateGeneration(mig_prob);
         }
 
@@ -170,9 +207,6 @@ int main(int argc, const char *argv[])
 
             // ---------------------------
             // Write CSV file for gene tree.
-            // Instead of naming by site index (k), use the user-given site position.
-            // Note: params.paramData->snpPositions stores the site positions in Morgans.
-            // Multiply by BasesPerMorgan to recover the original value.
             double originalValue = params.paramData->snpPositions[pos] * params.paramData->BasesPerMorgan;
             int bp_val = static_cast<int>(originalValue);
             stringstream csvFileName;

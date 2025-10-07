@@ -45,7 +45,9 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
     double doubtemp;
     std::istringstream iss;
 
-    // Read in different params (order must match the list passed from the Python wrapper)
+    for (const auto& s : param_vec)
+        std::cerr << s << '\n';
+
 
     // nruns (param_vec[0])
     paramData->nRuns = std::stoi(param_vec[0]);
@@ -258,7 +260,11 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
         {
             std::cerr << "Sample in Pop " << p << ": ";
             iss.clear();
-            iss.str(param_vec[19]);
+            iss.str(param_vec[19 + p]);
+            std::cerr << "\n";
+            std::cerr << "Reading stuff " << param_vec[18 + p] << ": ";
+            std::cerr << "\n";
+
             while (iss >> temp)
             {
                 paramData->nCarriers.at(p).push_back(temp);

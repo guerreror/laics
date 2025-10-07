@@ -282,9 +282,7 @@ void World::speciation() {
 
     unsigned int newA = (A > B) ? (A - 1) : A;
 
-    // 2) Relabel all chromosomes:
-    //    - B -> newA
-    //    - any pop > B -> pop-1
+
     std::vector< std::shared_ptr<Chromosome> > allChr;
     allChr.reserve(totalNCarriers());
     for (auto &vec : *worldData->carriers)
@@ -295,7 +293,6 @@ void World::speciation() {
         int p = chr->getContext().pop;
         if      (p == (int)B) chr->setPopulation(newA);
         else if (p  > (int)B) chr->setPopulation(p - 1);
-        // else p < B: unchanged
     }
 
     // --- DEBUG: clusters BEFORE rebuild (map still reflects old layout) ---
@@ -306,7 +303,6 @@ void World::speciation() {
                   << " -> cid=" << kv.second << "\n";
     }
 
-    // 3) Rebuild clusters and carrier buckets
     rebuildClustersAndCarriers();
 
     // --- DEBUG: clusters AFTER rebuild ---
@@ -317,9 +313,7 @@ void World::speciation() {
                   << " -> cid=" << kv.second << "\n";
     }
 
-    // 4) Rebuild freq vector:
-    //    - set merged pop (newA) to newFreq / (1-newFreq)
-    //    - copy others from oldFreq, accounting for the removed B
+
     std::vector<double> newFreqVec(worldData->nClust, 0.0);
     for (auto &kv : cluster) {
         const Context &ctxNew = kv.first;
@@ -329,7 +323,7 @@ void World::speciation() {
             newFreqVec[cidNew] = ctxNew.inversion ? newFreq : (1.0 - newFreq);
         } else {
             int oldPop = ctxNew.pop;
-            if (oldPop >= (int)B) oldPop += 1;  // map new index -> old index
+            if (oldPop >= (int)B) oldPop += 1;  
             Context ctxOld(oldPop, ctxNew.inversion);
             auto itOld = oldCluster.find(ctxOld);
             if (itOld != oldCluster.end()) {

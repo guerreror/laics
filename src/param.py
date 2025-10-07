@@ -20,9 +20,8 @@ parameters = {
     "kingman_coal": "1",
     "drift_sim":    "0",
     "msOutput":     "1",
-    # popSizeVec/speciation/demography are derived below from demes.yaml
     "popSizeVec":   "1000 1000",
-    "inv_freq":     "0.2 0.3",              # leaves' initial inversion freqs (one per present-day pop)
+    "inv_freq":     "0.2 0.3",              
     "speciation":   "0 0 0",
     "demography":   "0 0 0",
     "inv_age":      "0",
@@ -36,7 +35,7 @@ parameters = {
     "snpPositions": "500 550 600 650 700 750 800 850 900 950",
     "randomSample": "0",
     "tempRead":     "10 0",
-    "nCarriers":    "10 0"
+    "nCarriers":    "10 0",
 }
 
 # ---------- Helpers for demes ----------
@@ -383,12 +382,30 @@ demog_str, demog_dbg = build_demography_from_demes_full(
 )
 parameters["demography"] = demog_str
 
-# Migration (take the first rate if present)
-if graph.migrations:
+def _extract_default_mig_rate_from_yaml(path):
     try:
-        parameters["migRate"] = str(graph.migrations[0].rate)
+        with open(path, "r") as _f:
+            raw = yaml.safe_load(_f) or {}
+        dflt = (raw.get("defaults") or {}).get("migration") or {}
+        rate = dflt.get("rate", None)
+        return float(rate) if rate is not None else None
     except Exception:
-        pass
+        return None
+
+mig_rate = None
+
+try:
+    if graph.migrations and hasattr(graph.migrations[0], "rate"):
+        mig_rate = float(graph.migrations[0].rate)
+except Exception:
+    mig_rate = None
+
+if mig_rate is None:
+    mig_rate = _extract_default_mig_rate_from_yaml(DEMES_YAML)
+
+if mig_rate is not None:
+    parameters["migRate"] = f"{mig_rate:g}"
+
 
 # ---------- Debug prints ----------
 print("\n=== Parsed speciation tree (past → present) ===")
@@ -470,7 +487,7 @@ print("\nFinal parameters being passed:")
 for k in keys_order:
     print(f"{k}: {parameters[k]}")
 
-# ---------- Run ----------
+
 try:
     result = subprocess.run([EXECUTABLE] + args_list, capture_output=True, text=True)
 except FileNotFoundError:

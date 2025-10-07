@@ -1,11 +1,31 @@
-Random Seed: 256479369
+Random Seed: 2084556747
 Input Seed: 1
+1
+1
+0
+1
+1000 1100 1200 900
+0.2 0.2 0.2 0.2
+1 0 3 2000 0.2 4000 0 1 3000 0.2 6000 0 1 5000 0.2 8000
+1 1000 0 4000 0 0 4000 7000 0 0 0 5500 9000 0 0 0 6000 10000 0 0 0
+0
+0.02
+1e8
+0
+0.2
+0 1e3
+1 10 1e-6
+0
+500 550 600 650 700 750 800 850 900 950
+1
+10 10 10 10
+10 0
 Number of runs: 1
 Assuming Kingman? 1
 Simulating drift? 0
 Output each set in ms format? 1
 Population Sizes: 0 = 1000 | 1 = 1100 | 2 = 1200 | 3 = 900 | 
-Frequencies of inverted chromosomes: 0 = 0.2 | 1 = 0.3 | 2 = 0.4 | 3 = 0.5 | 
+Frequencies of inverted chromosomes: 0 = 0.2 | 1 = 0.2 | 2 = 0.2 | 3 = 0.2 | 
 Speciation MERGE: pop3→pop0 at t=2000 with inv‑freq=0.2
 Demography change time: 1000
 Reminder: this coeff multiplies all pop sizes in the preceding epoch
@@ -18,17 +38,14 @@ Inversion from: 0 to 1000 (0 - 1e-05 recUnits)
 Number of markers to simulate: 10
 Markers in random locations? 0
 10 Site positions read.
-Random sample of carriers? 0
-Sample in Pop 0: 10 0 
-Sample in Pop 1: 10 0 
-Sample in Pop 2: 10 0 
-Sample in Pop 3: 10 0 
+Random sample of carriers? 1
+[mig] loaded 3 matrices from src/migration_matrices.json
 >>> Epoch breaks: 1000 2000 3000 4000 5000 5500 6000 
 >>> Epoch types:  2 1 1 2 1 2 2 
 *** updateToNextEpoch() called for epoch 0 (time=1000, type=2)
 [demoChange] generation 1000: resulting popSizes = 1000 4000 1200 900 
 *** updateToNextEpoch() called for epoch 1 (time=2000, type=1)
-[Speciation] BEFORE merge: pop 0=9 carriers, pop 3=13 carriers
+[Speciation] BEFORE merge: pop 0=10 carriers, pop 3=13 carriers
 [Speciation] Using result size R=4000 from demes.
 Clusters BEFORE rebuild:
   pop=0, inv=0 -> cid=0
@@ -46,10 +63,11 @@ Clusters AFTER rebuild:
   pop=1, inv=1 -> cid=3
   pop=2, inv=0 -> cid=4
   pop=2, inv=1 -> cid=5
-[Speciation] AFTER  merge: pop 0=22 carriers, pop 3=0 carriers
+[Speciation] AFTER  merge: pop 0=23 carriers, pop 3=0 carriers
 [Speciation] pop 3→0; popSizes = 4000 4000 1200  ; nClust=6
+[mig] switched matrix @t=2000 (rows=8)
 *** updateToNextEpoch() called for epoch 2 (time=3000, type=1)
-[Speciation] BEFORE merge: pop 0=19 carriers, pop 1=15 carriers
+[Speciation] BEFORE merge: pop 0=21 carriers, pop 1=13 carriers
 [Speciation] Using result size R=6000 from demes.
 Clusters BEFORE rebuild:
   pop=0, inv=0 -> cid=0
@@ -63,12 +81,13 @@ Clusters AFTER rebuild:
   pop=0, inv=1 -> cid=1
   pop=1, inv=0 -> cid=2
   pop=1, inv=1 -> cid=3
-[Speciation] AFTER  merge: pop 0=34 carriers, pop 1=13 carriers
+[Speciation] AFTER  merge: pop 0=34 carriers, pop 1=10 carriers
 [Speciation] pop 1→0; popSizes = 6000 1200  ; nClust=4
+[mig] switched matrix @t=3000 (rows=8)
 *** updateToNextEpoch() called for epoch 3 (time=4000, type=2)
 [demoChange] generation 4000: resulting popSizes = 7000 1200 
 *** updateToNextEpoch() called for epoch 4 (time=5000, type=1)
-[Speciation] BEFORE merge: pop 0=23 carriers, pop 1=10 carriers
+[Speciation] BEFORE merge: pop 0=24 carriers, pop 1=10 carriers
 [Speciation] Using result size R=8000 from demes.
 Clusters BEFORE rebuild:
   pop=0, inv=0 -> cid=0
@@ -78,14 +97,14 @@ Clusters BEFORE rebuild:
 Clusters AFTER rebuild:
   pop=0, inv=0 -> cid=0
   pop=0, inv=1 -> cid=1
-[Speciation] AFTER  merge: pop 0=33 carriers, pop 1=0 carriers
+[Speciation] AFTER  merge: pop 0=34 carriers, pop 1=0 carriers
 [Speciation] pop 1→0; popSizes = 8000  ; nClust=2
 *** updateToNextEpoch() called for epoch 5 (time=5500, type=2)
 [demoChange] generation 5500: resulting popSizes = 9000 
 *** updateToNextEpoch() called for epoch 6 (time=6000, type=2)
 [demoChange] generation 6000: resulting popSizes = 10000 
 
-Mean LD (E[T1,n]) = 9.22863
+Mean LD (E[T1,n]) = 22.7711
 Mean TMRCA per site (E[T1]...E[Tn])
- 4.04329 4.0763 1.80569 3.23822 3.66357 9.08996 2.69458 1.80283 6.19331 2.28246
-Elapsed time: 1.14119s
+ 2.29054 10.3262 3.33537 3.56963 3.48836 3.88698 2.94538 3.81497 2.40059 9.94137
+Elapsed time: 0.909114s
