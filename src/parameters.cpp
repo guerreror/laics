@@ -231,51 +231,85 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
     }
 
     // Random sample flag (param_vec[17])
+    // Random sample flag (param_vec[17])
+// Random sample flag (param_vec[17])
     bool randomSample = (param_vec[17] == "1");
     std::cerr << "Random sample of carriers? " << randomSample << '\n';
 
     paramData->nCarriers.resize(pops);
+
+    const std::size_t base = 18; // first string after randomSample
+
     if (randomSample)
     {
-        vector<int> tempRead;
-        iss.clear();
-        iss.str(param_vec[18]);
-        tempRead = vector<int>(std::istream_iterator<int>(iss), std::istream_iterator<int>());
-        if (tempRead.size() != pops)
-        {
-            std::cerr << "Inconsistent number of sample sizes found (should be equal to number of pops)\n";
+        // ---- RANDOM == 1 ----
+        // Expect exactly ONE string (param_vec[18]) named "tempRead" with <pops> integers.
+        if (param_vec.size() <= base) {
+            std::cerr << "Error: randomSample==1 requires one 'tempRead' string at param_vec[18] "
+                    << "with " << pops << " integers (one per population).\n";
             exit(1);
         }
-        for (unsigned int p = 0; p < pops; ++p)
-        {
+
+        std::istringstream iss_local(param_vec[base]);
+        std::vector<int> tempRead((std::istream_iterator<int>(iss_local)),
+                                std::istream_iterator<int>());
+
+        if (tempRead.size() != pops) {
+            std::cerr << "Inconsistent number of sample sizes in tempRead: got "
+                    << tempRead.size() << ", expected " << pops << " (one per population).\n";
+            exit(1);
+        }
+
+        for (unsigned int p = 0; p < pops; ++p) {
             int invcount = randbinom(tempRead[p], paramData->initialFreqs.at(p));
-            paramData->nCarriers.at(p).push_back(tempRead[p] - invcount);
-            paramData->nCarriers.at(p).push_back(invcount);
+            paramData->nCarriers.at(p).push_back(tempRead[p] - invcount); // standard
+            paramData->nCarriers.at(p).push_back(invcount);               // inverted
         }
     }
     else
     {
-        int totalSample = 0;
-        for (unsigned int p = 0; p < pops; ++p)
-        {
-            std::cerr << "Sample in Pop " << p << ": ";
-            iss.clear();
-            iss.str(param_vec[19 + p]);
-            std::cerr << "\n";
-            std::cerr << "Reading stuff " << param_vec[18 + p] << ": ";
-            std::cerr << "\n";
-
-            while (iss >> temp)
-            {
-                paramData->nCarriers.at(p).push_back(temp);
-                totalSample += temp;
-                std::cerr << temp << " ";
-            }
-            std::cerr << '\n';
+        // ---- RANDOM == 0 ----
+        // Expect EXACTLY <pops> per-pop strings starting at param_vec[18].
+        // The FIRST one can be named "tempRead" and is simply used as Pop 0's pair.
+        // Each string must contain exactly TWO integers: "<standard> <inverted>".
+        if (param_vec.size() < base + pops) {
+            std::size_t provided = (param_vec.size() > base) ? (param_vec.size() - base) : 0;
+            std::cerr << "Error: randomSample==0 requires " << pops
+                    << " per-pop sample strings starting at param_vec[18] "
+                    << "(the first may be 'tempRead'), but only " << provided
+                    << " provided.\n";
+            exit(1);
         }
+
+        int totalSample = 0;
+
+        for (unsigned int p = 0; p < pops; ++p) {
+            std::cerr << "Sample in Pop " << p << ": ";
+
+            std::istringstream iss_local(param_vec[base + p]);
+            std::vector<int> pairVals((std::istream_iterator<int>(iss_local)),
+                                    std::istream_iterator<int>());
+
+            if (pairVals.size() != 2) {
+                std::cerr << "Error: for pop " << p << " expected exactly two integers "
+                        << "(standard inverted) but got " << pairVals.size()
+                        << " in '" << param_vec[base + p] << "'.\n";
+                exit(1);
+            }
+
+            paramData->nCarriers.at(p).push_back(pairVals[0]);
+            paramData->nCarriers.at(p).push_back(pairVals[1]);
+            totalSample += pairVals[0] + pairVals[1];
+
+            std::cerr << pairVals[0] << " " << pairVals[1] << '\n';
+        }
+
         if (totalSample == 2)
             std::cerr << "Sample size = 2 || Warning: Informative sites length function won't work.\n";
     }
+
+
+
 }
 
 Parameters::~Parameters(){
