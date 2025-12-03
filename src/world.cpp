@@ -118,7 +118,6 @@ World::World(shared_ptr<Parameters::ParameterData> p){
         }
     }
 
-    // --- speciation parsing (new 1 A B T F R format; backward compatible) ---
 	if (!p->speciation.empty() && p->speciation.at(0) == 1) {
 		// Prefer new stride = 5 (A,B,T,F,R). If only 4 fields remain, treat like legacy (A,B,T,F) with no R.
 		size_t i = 1;
@@ -141,14 +140,13 @@ World::World(shared_ptr<Parameters::ParameterData> p){
 				events.push_back({ T, 1, F, { A, B } });
 				i += 4;
 			} else {
-				break; // trailing junk; ignore
+				break; 
 			}
 		}
 	}
 
 
 
-    // inversion-age event
     if (p->inv_age > 0) {
         events.push_back({ double(p->inv_age), 0, 0.0, {} });
     }
@@ -203,11 +201,11 @@ World::World(shared_ptr<Parameters::ParameterData> p){
     worldData->generation=1.0;
 
 	// debug: what epochs do we have?
-	std::cerr << ">>> Epoch breaks: ";
-	for (double t : worldData->epoch_breaks) std::cerr << t << " ";
-	std::cerr << "\n>>> Epoch types:  ";
-	for (unsigned ty : worldData->epochType)   std::cerr << ty << " ";
-	std::cerr << "\n";
+	// std::cerr << ">>> Epoch breaks: ";
+	// for (double t : worldData->epoch_breaks) std::cerr << t << " ";
+	// std::cerr << "\n>>> Epoch types:  ";
+	// for (unsigned ty : worldData->epochType)   std::cerr << ty << " ";
+	// std::cerr << "\n";
 
 } // End constructor for World
 
@@ -232,26 +230,26 @@ bool World::simulationFinished(){
     return false;
 }
 
-bool World::sitesCoalesced(){
-    //
-    // Determine if all sites of interest have coalesced
-    //
-    vector<int> carrierCounter(worldData->snpSites.size(),0);
+bool World::sitesCoalesced() {
+    const auto &sites = worldData->snpSites;
+    if (sites.empty()) return true;
 
-	for( cluster_t::iterator iter = cluster.begin(); iter != cluster.end(); ++iter ) {
-        for(int j=0; j< worldData->carriers->at((*iter).second).size(); ++j){
-            for(int s=0; s< worldData->snpSites.size(); ++s){
-                double site= worldData->snpSites[s];
-                if(worldData->carriers->at((*iter).second)[j]->carriesSite(site)) ++carrierCounter[s];
+    std::vector<int> counts(sites.size(), 0);
+    const auto &carriers = *worldData->carriers;
+	
+    for (const auto &kv : cluster) {
+        const auto &bucket = carriers[kv.second];
+        for (const auto &chr : bucket) {
+            for (std::size_t idx = 0; idx < sites.size(); ++idx) {
+                if (chr->carriesSite(sites[idx]) && ++counts[idx] > 1) {
+                    return false; 
+                }
             }
         }
     }
-    bool out = true;
-    for (int i=0; i< carrierCounter.size();++i){
-        if(carrierCounter[i]>1) out= false;
-    }
-    return out;
+    return true; 
 }
+
 
 void World::forceAllCoal(){
  

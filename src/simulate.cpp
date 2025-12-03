@@ -41,7 +41,7 @@ using boost::math::binomial_coefficient;
 #include "sitenode.h"
 
 
-//	Implimentation notes:
+//	Implementation notes:
 
 //		Homokaryotypic recombination is done with interference: there's a maximum of one recombination event per chromosome.
 //		Autosomal inheritance assumed
@@ -190,9 +190,9 @@ bool World::timeCheck(double waiting, double Rate){
 
 void World::updateToNextEpoch(){
     int out = worldData->current_epoch;
-    std::cerr << "*** updateToNextEpoch() called for epoch " << out
-              << " (time=" << worldData->epoch_breaks[out]
-              << ", type=" << worldData->epochType[out] << ")\n";
+    // std::cerr << "*** updateToNextEpoch() called for epoch " << out
+    //           << " (time=" << worldData->epoch_breaks[out]
+    //           << ", type=" << worldData->epochType[out] << ")\n";
 
 
     int outof_epoch = worldData->current_epoch;
@@ -237,10 +237,10 @@ void World::demoChange() {
         }
     }
 
-    std::cerr << "[demoChange] generation " << worldData->generation
-              << ": resulting popSizes = ";
-    for (auto s : worldData->popSize) std::cerr << s << " ";
-    std::cerr << "\n";
+    // std::cerr << "[demoChange] generation " << worldData->generation
+    //           << ": resulting popSizes = ";
+    // for (auto s : worldData->popSize) std::cerr << s << " ";
+    // std::cerr << "\n";
 }
 
 
@@ -267,15 +267,15 @@ void World::speciation() {
     // Debug (before we erase B)
     size_t beforeA = popNcarriers(A);
     size_t beforeB = popNcarriers(B);
-    std::cerr << "[Speciation] BEFORE merge: pop "
-              << A << "=" << beforeA << " carriers, pop "
-              << B << "=" << beforeB << " carriers\n";
+    // std::cerr << "[Speciation] BEFORE merge: pop "
+    //           << A << "=" << beforeA << " carriers, pop "
+    //           << B << "=" << beforeB << " carriers\n";
 
     if (hasR) {
-        std::cerr << "[Speciation] Using result size R=" << R << " from demes.\n";
+        // std::cerr << "[Speciation] Using result size R=" << R << " from demes.\n";
         worldData->popSize[A] = R;
     } else {
-        std::cerr << "[Speciation] No result size provided; using A += B fallback.\n";
+        // std::cerr << "[Speciation] No result size provided; using A += B fallback.\n";
         worldData->popSize[A] += worldData->popSize[B];
     }
     worldData->popSize.erase(worldData->popSize.begin() + B);
@@ -296,22 +296,22 @@ void World::speciation() {
     }
 
     // --- DEBUG: clusters BEFORE rebuild (map still reflects old layout) ---
-    std::cerr << "Clusters BEFORE rebuild:\n";
-    for (auto &kv : cluster) {
-        std::cerr << "  pop=" << kv.first.pop
-                  << ", inv=" << kv.first.inversion
-                  << " -> cid=" << kv.second << "\n";
-    }
+    // std::cerr << "Clusters BEFORE rebuild:\n";
+    // for (auto &kv : cluster) {
+    //     std::cerr << "  pop=" << kv.first.pop
+    //               << ", inv=" << kv.first.inversion
+    //               << " -> cid=" << kv.second << "\n";
+    // }
 
     rebuildClustersAndCarriers();
 
-    // --- DEBUG: clusters AFTER rebuild ---
-    std::cerr << "Clusters AFTER rebuild:\n";
-    for (auto &kv : cluster) {
-        std::cerr << "  pop=" << kv.first.pop
-                  << ", inv=" << kv.first.inversion
-                  << " -> cid=" << kv.second << "\n";
-    }
+    // // --- DEBUG: clusters AFTER rebuild ---
+    // std::cerr << "Clusters AFTER rebuild:\n";
+    // for (auto &kv : cluster) {
+    //     std::cerr << "  pop=" << kv.first.pop
+    //               << ", inv=" << kv.first.inversion
+    //               << " -> cid=" << kv.second << "\n";
+    // }
 
 
     std::vector<double> newFreqVec(worldData->nClust, 0.0);
@@ -338,13 +338,13 @@ void World::speciation() {
     size_t afterA = popNcarriers(newA);
     size_t afterB = (B < worldData->nPops) ? popNcarriers(B) : 0;
 
-    std::cerr << "[Speciation] AFTER  merge: pop "
-              << newA << "=" << afterA << " carriers, pop "
-              << B   << "=" << afterB << " carriers\n";
+    // std::cerr << "[Speciation] AFTER  merge: pop "
+    //           << newA << "=" << afterA << " carriers, pop "
+    //           << B   << "=" << afterB << " carriers\n";
 
-    std::cerr << "[Speciation] pop " << B << "→" << newA << "; popSizes = ";
-    for (auto s : worldData->popSize) std::cerr << s << " ";
-    std::cerr << " ; nClust=" << worldData->nClust << "\n";
+    // std::cerr << "[Speciation] pop " << B << "→" << newA << "; popSizes = ";
+    // for (auto s : worldData->popSize) std::cerr << s << " ";
+    // std::cerr << " ; nClust=" << worldData->nClust << "\n";
 }
 
 

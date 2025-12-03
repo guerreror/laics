@@ -1,80 +1,25 @@
-description: staged splits → (0,3) @2000, then +1 @3000, then +2 @5000
+description: two pops of size 10000 split from a single ancestor at 10000 generations
 time_units: generations
+
 demes:
+  # Ancestral deme
   - name: root
     epochs:
-      - end_time: 6000
-        start_size: 10000
+      - start_size: 10000
+        end_time: 10000    
 
-  # Final merge parent (with pop2) at 5000
-  - name: ancestor3
-    start_time: 6000
+  - name: pop0
+    start_time: 10000
     ancestors: [root]
     epochs:
-      - end_time: 5500
-        start_size: 9000
-      - end_time: 5000
-        start_size: 8000
-
-  # Second merge parent (with pop1) at 3000
-  - name: ancestor2
-    start_time: 5000
-    ancestors: [ancestor3]
-    epochs:
-      - end_time: 4000
-        start_size: 7000
-      - end_time: 3000
-        start_size: 6000
-
-  # First merge parent (pop0 with pop3) at 2000
-  - name: ancestor1
-    start_time: 3000
-    ancestors: [ancestor2]
-    epochs:
-      - end_time: 2000
-        start_size: 4000
-
-  # Leaves
-  - name: pop0
-    start_time: 2000
-    ancestors: [ancestor1]
-    epochs:
-      - end_time: 0
-        start_size: 1000
-
-  - name: pop3
-    start_time: 2000
-    ancestors: [ancestor1]
-    epochs:
-      - end_time: 0
-        start_size: 900
-
-  - name: pop1
-    start_time: 3000
-    ancestors: [ancestor2]
-    epochs:
-      - start_size: 4000
-        end_time: 1000
-      - start_size: 1100
+      - start_size: 10000
         end_time: 0
 
-  - name: pop2
-    start_time: 5000
-    ancestors: [ancestor3]
+  - name: pop1
+    start_time: 10000
+    ancestors: [root]
     epochs:
-      - end_time: 0
-        start_size: 1200
+      - start_size: 10000
+        end_time: 0
 
-migrations:
-  - demes: [pop0, pop1]
-    rate: 0.02
-  - demes: [pop0, pop2]
-    rate: 0.02
-  - demes: [pop0, pop3]
-    rate: 0.02
-  - demes: [pop1, pop2]
-    rate: 0.02
-  - demes: [pop1, pop3]
-    rate: 0.02
-  - demes: [pop2, pop3]
-    rate: 0.02
+migrations: []

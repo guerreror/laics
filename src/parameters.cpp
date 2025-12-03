@@ -45,9 +45,6 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
     double doubtemp;
     std::istringstream iss;
 
-    for (const auto& s : param_vec)
-        std::cerr << s << '\n';
-
 
     // nruns (param_vec[0])
     paramData->nRuns = std::stoi(param_vec[0]);

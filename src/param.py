@@ -9,9 +9,9 @@ import random
 from collections import defaultdict, deque
 
 # ---------- File paths ----------
-OTHER_YAML      = "src/other.yaml"
+PARAMETERS_YAML      = "src/parameters.yaml"
 DEMES_YAML      = "src/demes.yaml"
-EXECUTABLE      = "./executables/labp_v19"
+EXECUTABLE      = "./executables/labp_v21"
 
 # ---------- Defaults ----------
 parameters = {
@@ -21,7 +21,7 @@ parameters = {
     "drift_sim":    "0",
     "msOutput":     "1",
     "popSizeVec":   "1000 1000",
-    "inv_freq":     "0.2 0.3",
+    "inv_freq":     "0.2 ",
     "speciation":   "0 0 0",
     "demography":   "0 0 0",
     "inv_age":      "0",
@@ -31,7 +31,7 @@ parameters = {
     "phi":          "0.2",
     "invRange":     "0 1e3",
     "fixedSNPs":    "1 10 1e-6",
-    "n_SNPs":       "0",
+    "randSNPs":       "0",
     "snpPositions": "500 550 600 650 700 750 800 850 900 950",
     "randomSample": "0",
     "tempRead":     "10 0",
@@ -292,17 +292,22 @@ def build_demography_from_demes_full(graph, leaf_order, spec_events):
                 active_groups[A].extend(active_groups[B])
                 del active_groups[B]
 
+    # NEW: no real events → no demography
+    if len(demog_entries) == 1:
+        return "0 0 0", []
+
     return " ".join(demog_entries), dbg_lines
 
-# ---------- Load other.yaml ----------
+
+# ---------- Load parameters.yaml ----------
 try:
-    with open(OTHER_YAML, 'r') as f:
+    with open(PARAMETERS_YAML, 'r') as f:
         other_params = yaml.safe_load(f) or {}
 except Exception as e:
-    print(f"Error loading {OTHER_YAML}: {e}", file=sys.stderr)
+    print(f"Error loading {PARAMETERS_YAML}: {e}", file=sys.stderr)
     sys.exit(1)
 
-# Copy keys from other.yaml
+# Copy keys from parameters.yaml
 for key, val in (other_params or {}).items():
     # copy any known key from defaults
     if key in parameters:
@@ -314,7 +319,7 @@ for key, val in (other_params or {}).items():
 
 ancestor_freqs = other_params.get("ancestor_frequencies", None)
 if ancestor_freqs is not None and not isinstance(ancestor_freqs, dict):
-    print("Error: 'ancestor_frequencies' in other.yaml must be a mapping (dict).", file=sys.stderr)
+    print("Error: 'ancestor_frequencies' in parameters.yaml must be a mapping (dict).", file=sys.stderr)
     sys.exit(1)
 
 DEFAULT_ANCESTOR_F = 0.2
@@ -371,65 +376,7 @@ print("\n=== Parsed speciation tree (past → present) ===")
 ascii_tree = render_tree_ascii(graph, only_these_leaves=debug_info["leaf_order"])
 print(ascii_tree)
 
-print("\n=== Present-day leaves (order → indices) ===")
-for i, name in enumerate(debug_info["leaf_order"]):
-    print(f"  {i}: {name}")
 
-print("\n=== Speciation plan (after reindexing between events) ===")
-if debug_info["events"]:
-    for line in debug_info["plan_log"]:
-        print("  " + line)
-    if debug_info["groups_log"]:
-        print("\n--- Group reindex snapshots ---")
-        for step, groups in enumerate(debug_info["groups_log"], 1):
-            print(f"  after merge {step}: {groups}")
-else:
-    print("  (none)")
-
-print("\n=== Demography plan (from demes.yaml) ===")
-if parameters["demography"].startswith("1"):
-    if demog_dbg:
-        for line in demog_dbg:
-            print(line)
-    else:
-        print("  (events exist, but all mapped to times where affected groups didn't yet exist pre-merge)")
-else:
-    print("  (none)")
-
-# ---------- Allow user tweaks EXCEPT derived fields ----------
-def print_parameters(params):
-    for k, v in params.items():
-        print(f"{k}: {v}")
-
-def modify_params(parameters):
-    print("Current Parameters:")
-    print_parameters(parameters)
-    ans = input("\nDo you want to modify any parameters? (Y/N): ").strip().lower()
-    if ans == 'y':
-        print("(Note: 'popSizeVec', 'speciation', and 'demography' are derived from demes.yaml and will be ignored if changed.)")
-        user_input = input("\nEnter parameters to modify (e.g., --seed 2 --nruns 3): ")
-        parser = argparse.ArgumentParser()
-        for key in parameters:
-            if key in ["popSizeVec", "speciation", "demography"]:
-                continue
-            if key in ["inv_freq","invRange","fixedSNPs","tempRead","nCarriers","snpPositions",
-                       "nCarriers1","nCarriers2","nCarriers3","nCarriers4","nCarriers5","nCarriers6","nCarriers7","nCarriers8","nCarriers9"]:
-                parser.add_argument(f"--{key}", nargs='+')
-            else:
-                parser.add_argument(f"--{key}")
-        if user_input.strip():
-            args = parser.parse_args(user_input.split())
-            for key, val in vars(args).items():
-                if val is not None:
-                    parameters[key] = " ".join(val) if isinstance(val, list) else str(val)
-        print("\nUpdated Parameters:")
-        print_parameters(parameters)
-    else:
-        print("\nNo changes made.")
-
-modify_params(parameters)
-
-# Re-assert derived values (in case user tried to change them)
 parameters["popSizeVec"] = pop_sizes_str
 parameters["speciation"] = speciation_str
 parameters["demography"] = demog_str
@@ -493,7 +440,7 @@ base_keys_order = [
     "seed","nruns","kingman_coal","drift_sim","msOutput",
     "popSizeVec","inv_freq","speciation","demography","inv_age",
     "migRate","BasesPerMorgan","randPhi","phi","invRange","fixedSNPs",
-    "n_SNPs","snpPositions","randomSample",
+    "randSNPs","snpPositions","randomSample",
 ]
 
 # Build the tail according to randomSample rule
@@ -507,6 +454,7 @@ args_list = [parameters[k] for k in base_keys_order] + per_pop_strings
 print("\nFinal parameters being passed:")
 for k in base_keys_order:
     print(f"{k}: {parameters[k]}")
+    
 # Print the tail clearly
 if random_flag == "1":
     print(f"tempRead: {parameters['tempRead']}")
@@ -522,8 +470,7 @@ except FileNotFoundError:
     print(f"\nERROR: Executable not found at {EXECUTABLE}", file=sys.stderr)
     sys.exit(1)
 
-print("\nC++ Program Output:\n", result.stdout)
-if result.stderr:
-    print("\nErrors:\n", result.stderr)
-    with open("Output_log.txt", "w") as log_file:
-        log_file.write(result.stderr)
+print("\nC++ Program Output:\n")
+print(result.stderr) #Output is sent to stderr and not to cout by the C++ program
+with open("Output_log.txt", "w") as log_file:
+    log_file.write(result.stderr)

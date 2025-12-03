@@ -37,7 +37,7 @@ using std::weak_ptr;
 #include "sitenode.h"    // SiteNode now includes our new CSV output method.
 #include "snptree.h"
 #include "tajima.h"
-#include "migprob.h"     // <-- NEW: time-scheduled migration matrices
+#include "migprob.h"    
 
 // Global declarations:
 std::random_device rd;
@@ -46,8 +46,6 @@ std::mt19937_64 gen(seed); // Random generator declared globally.
 
 vector<vector<double>> buildMigMatrix(Parameters &p)
 {
-    // ======================================================================================
-    // A simple stepping-stone migration matrix.
     unsigned int nPops = static_cast<int>(p.paramData->popSizeVec.size());
     vector<vector<double>> mig_prob;
     mig_prob.resize(nPops);
@@ -88,7 +86,6 @@ int main(int argc, const char *argv[])
 {
     std::cerr << "Random Seed: " << seed << '\n';
 
-    // If a seed is provided as the first argument, update the seed.
     auto input_seed = std::stoi(argv[1]);
     if (input_seed != -1)
     {
@@ -132,10 +129,9 @@ int main(int argc, const char *argv[])
         if (mig_prob.empty()) {
             mig_prob = schedule.front().second; 
         }
-        std::cerr << "[mig] loaded " << schedule.size() << " matrices from " << mig_json << "\n";
+        //std::cerr << "[mig] loaded " << schedule.size() << " matrices from " << mig_json << "\n";
     } else {
         mig_prob = buildMigMatrix(params);
-        std::cerr << "[mig] no JSON; using fallback builder.\n";
     }
     // -----------------------------
 
@@ -177,11 +173,10 @@ int main(int argc, const char *argv[])
                 if (now >= tnext) {
                     mig_prob = schedule[next_idx].second;
                     ++next_idx;
-                    std::cerr << "[mig] switched matrix @t=" << tnext
-                              << " (rows=" << mig_prob.size() << ")\n";
+                    // std::cerr << "[mig] switched matrix @t=" << tnext
+                    //           << " (rows=" << mig_prob.size() << ")\n";
                 }
             }
-            // -----------------------------
 
             totalEvents += world->simulateGeneration(mig_prob);
         }
@@ -202,16 +197,16 @@ int main(int argc, const char *argv[])
 
             // Create gene tree for the current site.
             SiteNode geneTree(params.paramData->neut_site[pos], allNodes.back());
-            geneTree.calcBranchLengths(0);
-            geneTree.calcBranchLengths_informative(0);
+            // geneTree.calcBranchLengths(0);
+            // geneTree.calcBranchLengths_informative(0);
 
-            // ---------------------------
-            // Write CSV file for gene tree.
-            double originalValue = params.paramData->snpPositions[pos] * params.paramData->BasesPerMorgan;
-            int bp_val = static_cast<int>(originalValue);
-            stringstream csvFileName;
-            csvFileName << "genetree_siteposition_" << bp_val << ".csv";
-            geneTree.writeCSV(csvFileName.str());
+            // // ---------------------------
+            // // Write CSV file for gene tree.
+            // double originalValue = params.paramData->snpPositions[pos] * params.paramData->BasesPerMorgan;
+            // int bp_val = static_cast<int>(originalValue);
+            // stringstream csvFileName;
+            // csvFileName << "genetree_siteposition_" << bp_val << ".csv";
+            // geneTree.writeCSV(csvFileName.str());
             // ---------------------------
 
             SNPtree tmp(geneTree, nCarriers, params.paramData->theta);
