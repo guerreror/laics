@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 # ---------- File paths ----------
 PARAMETERS_YAML      = "src/parameters.yaml"
 DEMES_YAML      = "src/demes.yaml"
-EXECUTABLE      = "./executables/labp_v21"
+EXECUTABLE      = "./executables/labp_v20"
 
 # ---------- Defaults ----------
 parameters = {

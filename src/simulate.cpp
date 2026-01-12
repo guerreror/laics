@@ -549,47 +549,70 @@ unsigned short World::recombineEvent(vector<double>& rate, double total, bool he
     
     RCDBG( "Recombination (hetero= "<<(int)hetero<<", double ="<<(int) gflux <<") happened in gen "<<nGenerations())
     
-    map<double, pair<unsigned long,int> > whichCarrier;
-    
-    int id=0;
-    double add=0;
-    for( cluster_t::iterator i = cluster.begin(); i != cluster.end(); ++i ) {
-        unsigned long clustID=i->second;
-        unsigned long nLocalCarriers = worldData->carriers->at(clustID).size();
-        
-        for(int carrierID = 0; carrierID < nLocalCarriers; ++carrierID){
-            if (rate[id]!=0) whichCarrier[(rate[id] + add) / total] = make_pair(clustID, carrierID) ;
-            add += rate[id];
-            ++id;
+    if (total <= 0) return 0;
+
+    const double roll = randreal(0, total);
+    double cumulative = 0.0;
+    unsigned long chosenCluster = 0;
+    int chosenCarrier = 0;
+    bool found = false;
+
+    auto& carriers = *worldData->carriers;
+
+    int id = 0;
+    for (cluster_t::iterator i = cluster.begin(); i != cluster.end() && !found; ++i) {
+        unsigned long clustID = i->second;
+        const auto &bucket = carriers[clustID];
+        const unsigned long nLocalCarriers = bucket.size();
+        for (int carrierID = 0; carrierID < static_cast<int>(nLocalCarriers); ++carrierID) {
+            double r = rate[id++];
+            if (r == 0) continue; // skip zero-rate entries
+            cumulative += r;
+            if (roll <= cumulative) {
+                chosenCluster = clustID;
+                chosenCarrier = carrierID;
+                found = true;
+                break;
+            }
+        }
+    }
+
+    // Fallback in case numerical issues prevent selection
+    if (!found) {
+        id = 0;
+        for (cluster_t::iterator i = cluster.begin(); i != cluster.end(); ++i) {
+            unsigned long clustID = i->second;
+            const auto &bucket = carriers[clustID];
+            for (int carrierID = 0; carrierID < static_cast<int>(bucket.size()); ++carrierID) {
+                if (rate[id++] != 0) {
+                    chosenCluster = clustID;
+                    chosenCarrier = carrierID;
+                }
+            }
         }
     }
     
-    pair<unsigned long,int> who = whichCarrier.lower_bound(randreal(0,1))->second;		// randomly decide which carrier will recombine, using the map.
-    // "who" is a pair
-    // who->first is the number of the context
-    // who->second is the number of the carrier in that context
-    
-    shared_ptr<Chromosome> chrom = worldData->carriers->at(who.first).at(who.second);			// Get the recombining carrier
+    shared_ptr<Chromosome> chrom = carriers[chosenCluster][chosenCarrier];			// Get the recombining carrier
     
     // create new chromosome
     shared_ptr<Chromosome> chrom2 = recomb_Wrap(chrom, hetero, gflux);
     
-    vector<shared_ptr<Chromosome> >::iterator pos = worldData->carriers->at(who.first).begin() + who.second;	// an iterator to the position of chrom. needed only for the function erase()
-    worldData->carriers->at(who.first).erase(pos); //erase chrom from old context
+    carriers[chosenCluster].erase(carriers[chosenCluster].begin() + chosenCarrier); //erase chrom from old context
     
     if(!chrom->isEmpty()){
-        worldData->carriers->at(cluster[chrom->getContext()]).push_back(chrom);	 //add chrom to new context
+        carriers[cluster[chrom->getContext()]].push_back(chrom);	 //add chrom to new context
     }
     
     if(!chrom2->isEmpty())
     {
-        worldData->carriers->at(cluster[chrom2->getContext()]).push_back(chrom2);	//	add chrom2 only if it holds segments
+        carriers[cluster[chrom2->getContext()]].push_back(chrom2);	//	add chrom2 only if it holds segments
     }
     
     RCDBG(totalNCarriers()<<" in "<<worldData->generation<<"\n")
     return 1;
     
 }
+
 shared_ptr<Chromosome> World::recomb_Wrap(shared_ptr<Chromosome> chrom, bool hetero, bool gflux){
     
     // Make a new ARG node
@@ -634,5 +657,3 @@ shared_ptr<Chromosome> World::recomb_Wrap(shared_ptr<Chromosome> chrom, bool het
     
     return chrom2;
 }
-
-

@@ -47,6 +47,7 @@ vector<Segment> splitSegments(vector<Segment>& old, double breakpoint, bool inve
 	SRCDBG("splitting at "<<breakpoint )
 	
 	vector<Segment> newSegVec;										// New vector of segments that lie to right of breakpoint
+	newSegVec.reserve(old.size());									// avoid reallocations; upper bound on pieces
 	unsigned long nSegs = old.size();
 	for(int i = 0; i < nSegs; ++i){									// Loop through segments carried by this chromosome
 		
@@ -90,7 +91,7 @@ vector<Segment> splitSegments(vector<Segment>& old, double breakpoint, bool inve
 		} // end breakpoint falls to the left or within this segment
 	} // end loop through segments
 	
-	newSegVec.resize(0);		// Breakpoint falls to the right of the rightmost segment carried by this chromosome
+	newSegVec.clear();		// Breakpoint falls to the right of the rightmost segment carried by this chromosome
 	SRCDBG("newSeg empty")
 	
 	
@@ -103,6 +104,7 @@ vector<Segment> splitSegments(vector<Segment>& old, double breakpoint, bool inve
 	SRCDBG("newSeg Size= "<<newSegVec.size()<< ", old size= "<<old.size())
 	return newSegVec;
 }
+
 
 
 shared_ptr<Chromosome> Chromosome::recombine(double breakpoint, shared_ptr< ARGNode > descNode, Context newContext, Segment& invRange) {

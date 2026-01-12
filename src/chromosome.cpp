@@ -381,10 +381,12 @@ bool Chromosome::isEmpty(){
 }
 
 bool Chromosome::carriesSite(double x){
-    vector<Segment>segs=get_All_SegVec();
-    for (int i=0; i< segs.size(); ++i){
-        if(x >= segs[i].L && x <=segs[i].R) return true;
+    vector<Segment> segs = get_All_SegVec();
+    for (int i = 0; i < segs.size(); ++i){
+        if (x < segs[i].L) break;             
+        if (x <= segs[i].R) return true;
     }
     return false;
 }
+
 

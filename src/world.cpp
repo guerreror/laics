@@ -234,9 +234,10 @@ bool World::sitesCoalesced() {
     const auto &sites = worldData->snpSites;
     if (sites.empty()) return true;
 
-    std::vector<int> counts(sites.size(), 0);
+    static thread_local std::vector<int> counts;
+    counts.assign(sites.size(), 0);
     const auto &carriers = *worldData->carriers;
-	
+		
     for (const auto &kv : cluster) {
         const auto &bucket = carriers[kv.second];
         for (const auto &chr : bucket) {
