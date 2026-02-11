@@ -11,7 +11,8 @@ from collections import defaultdict, deque
 # ---------- File paths ----------
 PARAMETERS_YAML      = "src/parameters.yaml"
 DEMES_YAML      = "src/demes.yaml"
-EXECUTABLE      = "./executables/labp_v20"
+EXECUTABLE_ARG  = "./executables/labp_v21"
+EXECUTABLE_SMC  = "./executables/labp_smc"
 
 # ---------- Defaults ----------
 parameters = {
@@ -35,6 +36,7 @@ parameters = {
     "snpPositions": "500 550 600 650 700 750 800 850 900 950",
     "randomSample": "0",
     "tempRead":     "10 0",
+    "smc":          "0",
 }
 
 # ---------- Helpers for demes ----------
@@ -316,6 +318,9 @@ for key, val in (other_params or {}).items():
     # ALSO copy any per-pop sample strings like nCarriers, nCarriers1, ...
     if key.startswith("nCarriers"):
         parameters[key] = str(val)
+
+smc_flag = parameters.get("smc", "0").strip()
+EXECUTABLE = EXECUTABLE_SMC if smc_flag == "1" else EXECUTABLE_ARG
 
 ancestor_freqs = other_params.get("ancestor_frequencies", None)
 if ancestor_freqs is not None and not isinstance(ancestor_freqs, dict):

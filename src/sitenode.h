@@ -37,10 +37,16 @@
  #include <memory>
  
  using std::vector;
- using std::string;
- using std::shared_ptr;
- 
- struct snpHit;
+using std::string;
+using std::shared_ptr;
+
+struct EdgeWeight {
+	unsigned long parent;
+	unsigned long child;
+	double weight;
+};
+
+struct snpHit;
  
  class SiteNode {
  public:
@@ -78,10 +84,17 @@
 	 void gatherAllNodes(vector<SiteNode*>& allNodes);
 	 void printAllNodesSorted(const vector<SiteNode*>& allNodes, const string &filename);
 	 void writeCSV(const string &filename);
+	 void writeDOT(const string &filename);
  
 	 // Additional functions required by snptree.h:
 	 double getTotalLength(double runtot);
 	 double getTotalLength_Informative(double runtot);
+	 void getTotalLengthByInversion(double &standard_len, double &inverted_len);
+	 void getEdgeWeightsByInversion(const vector<unsigned int> &pop_sizes,
+									const vector<double> &inv_freqs,
+									double r,
+									vector<EdgeWeight> &standard_edges,
+									vector<EdgeWeight> &inverted_edges);
 	 snpHit getSNPhit(double target, snpHit x);
 	 vector<unsigned> outputSNPs(vector<unsigned> s);
 	 double getBranchLength();

@@ -187,7 +187,6 @@ int main(int argc, const char *argv[])
         unsigned novar = 0;
         vector<double> varPos;
         double lengthLastSite = 0.0;
-
         // For each site, construct the gene tree and process SNP statistics.
         for (int k = 0; k < (int)nSites; ++k)
         {
@@ -208,7 +207,6 @@ int main(int argc, const char *argv[])
             // csvFileName << "genetree_siteposition_" << bp_val << ".csv";
             // geneTree.writeCSV(csvFileName.str());
             // ---------------------------
-
             SNPtree tmp(geneTree, nCarriers, params.paramData->theta);
             unsigned mutantCount = accumulate(tmp.SNPvalues.begin(), tmp.SNPvalues.end(), 0U);
             if (mutantCount > 0)
