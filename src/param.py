@@ -470,12 +470,29 @@ else:
         print(f"{key} (pop{i}): {parameters[key]}")
 
 try:
-    result = subprocess.run([EXECUTABLE] + args_list, capture_output=True, text=True)
+    proc = subprocess.Popen(
+        [EXECUTABLE] + args_list,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
 except FileNotFoundError:
     print(f"\nERROR: Executable not found at {EXECUTABLE}", file=sys.stderr)
     sys.exit(1)
 
 print("\nC++ Program Output:\n")
-print(result.stderr) #Output is sent to stderr and not to cout by the C++ program
+stderr_lines = []
+while True:
+    line = proc.stderr.readline()
+    if line == "" and proc.poll() is not None:
+        break
+    if line:
+        print(line, end="")
+        stderr_lines.append(line)
+
+if proc.returncode != 0:
+    print(f"\nExecutable exited with code {proc.returncode}", file=sys.stderr)
+
 with open("Output_log.txt", "w") as log_file:
-    log_file.write(result.stderr)
+    log_file.writelines(stderr_lines)

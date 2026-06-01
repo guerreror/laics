@@ -22,4 +22,6 @@ demes:
       - start_size: 10000
         end_time: 0
 
-migrations: []
+migrations:
+  - demes: [pop0, pop1]
+    rate: 0.005

@@ -41,6 +41,10 @@
 
 #include <vector>
 	using std::vector;
+#include <string>
+	using std::string;
+#include <unordered_set>
+	using std::unordered_set;
 	
 #include <memory>
 using std::shared_ptr;
@@ -94,17 +98,19 @@ class ARGNode
 	void addDescendant(shared_ptr < ARGNode > descNode,			// Adds descNode as a descendant node and adds segList as its corresponding 
 						vector<Segment> segList);	//	vector of segments;  sets current node as ancestor of the new descendant
 // Functions that get values:
-	unsigned long getNodeNumber();							// Get the identifier number of this node
-	double getTime();									// Get the time (= age) of this node
-	Context getContext();							// Get the context for this node
-	unsigned long getNAncestors();							// Get the number of ancestral nodes of this node
+	unsigned long getNodeNumber() const;							// Get the identifier number of this node
+	double getTime() const;									// Get the time (= age) of this node
+	Context getContext() const;							// Get the context for this node
+	unsigned long getNAncestors() const;							// Get the number of ancestral nodes of this node
 	ARGNode * getAncestor(unsigned long i);					// Get pointer to ancestral node i
-	unsigned long getNDescendants();							// Get the number of descendant nodes from this node
-	shared_ptr < ARGNode > getDescendantNode(unsigned long i);				// Get pointer to descendant node i
-	vector<Segment> getDescendantSegmentVector(unsigned long i);	// Get descendant segment vector i
+	unsigned long getNDescendants() const;							// Get the number of descendant nodes from this node
+	shared_ptr < ARGNode > getDescendantNode(unsigned long i) const;				// Get pointer to descendant node i
+	vector<Segment> getDescendantSegmentVector(unsigned long i) const;	// Get descendant segment vector i
 // Output data for this node:
 	void outputNode();								// Prints out the node's data
 	void outputARG();								// Prints out the ARG descending from this node 
+	void gatherAllNodes(unordered_set<const ARGNode*>& seen, vector<const ARGNode*>& out) const;
+	void writeDOT(const string &filename) const;
 };
 
 

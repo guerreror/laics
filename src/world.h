@@ -62,6 +62,11 @@ public:
 	unsigned short  recombineEvent(vector<double>& rate, double total, bool hetero, bool gflux);
 	unsigned short  doubrecEvent(vector<double>& rate, double total);
 	unsigned short  simulateGeneration(vector< vector< double > >& mig_prob);
+	unsigned short  simulateGeneration_SMC(vector< vector< double > >& mig_prob);
+	bool timeCheck_SMC(double waiting, double Rate);
+	void updateToNextEpoch_SMC();
+	unsigned short  migrateEvent_SMC(vector < vector< double> >& mig_prob, vector<double>& rate, double total);
+	unsigned short  coalesceEvent_SMC(vector<double>& rate, double total);
 	unsigned short migratePoisson(vector < vector< double> >& mig_prob);
 	unsigned short  coalescePoisson();
 	unsigned short  recombine_all();
@@ -81,6 +86,7 @@ public:
     void speciation();
 	void rebuildClustersAndCarriers();
 	shared_ptr< Chromosome> recomb_Wrap(shared_ptr<Chromosome> chrom, bool hetero, bool gflux);
+	void recordContextFlip(shared_ptr<Chromosome> chrom);
     vector< shared_ptr < ARGNode > > initialARGnodes; //public vector of pointers to the original ARG nodes. For use in output of sample
     
 	//CCD change imported from sexCoal
@@ -125,4 +131,3 @@ struct World::WorldData		// Structure with the private data for World, accessed 
 
 
 #endif /*WORLD_*/
-

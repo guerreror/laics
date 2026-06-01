@@ -200,12 +200,12 @@ World::World(shared_ptr<Parameters::ParameterData> p){
     
     worldData->generation=1.0;
 
-	// debug: what epochs do we have?
-	// std::cerr << ">>> Epoch breaks: ";
-	// for (double t : worldData->epoch_breaks) std::cerr << t << " ";
-	// std::cerr << "\n>>> Epoch types:  ";
-	// for (unsigned ty : worldData->epochType)   std::cerr << ty << " ";
-	// std::cerr << "\n";
+	// Debug: print global epoch schedule (time + type).
+	std::cerr << ">>> Epoch breaks: ";
+	for (double t : worldData->epoch_breaks) std::cerr << t << " ";
+	std::cerr << "\n>>> Epoch types:  ";
+	for (unsigned ty : worldData->epochType) std::cerr << ty << " ";
+	std::cerr << "\n";
 
 } // End constructor for World
 
@@ -213,6 +213,14 @@ World::World(shared_ptr<Parameters::ParameterData> p){
 
 World::~World(){
 	DBG("Population:: Destructing...")
+}
+
+void World::recordContextFlip(shared_ptr<Chromosome> chrom){
+	if (!chrom || chrom->isEmpty()) return;
+	shared_ptr<ARGNode> newNode;
+	newNode.reset(new ARGNode(worldData->argNodeVec.size(), chrom, worldData->generation));
+	worldData->argNodeVec.push_back(newNode);
+	chrom->setDescendant(newNode);
 }
 
 

@@ -14,7 +14,9 @@ using std::shared_ptr;
 #include <iostream>
 	using std::cout;
 	using std::endl;
-	
+#include <fstream>
+#include <unordered_set>
+
 #include "chromosome.h"
 #include "argnode.h"
 #include "typedefs.h"
@@ -129,28 +131,28 @@ void ARGNode::addDescendant(shared_ptr < ARGNode >descNode, vector<Segment> segV
 	
 
 
-unsigned long ARGNode::getNodeNumber()	// Return the identifier number of this node
+unsigned long ARGNode::getNodeNumber() const	// Return the identifier number of this node
 {
 	return(nodeNumber);
 }
 
 
 
-double ARGNode::getTime()	// Return the time (= age) of this node
+double ARGNode::getTime() const	// Return the time (= age) of this node
 {
 	return(time);
 }
 
 
 
-Context ARGNode::getContext()	// Return the context this node
+Context ARGNode::getContext() const	// Return the context this node
 {
 	return(context);
 }
 
 
 
-unsigned long ARGNode::getNAncestors()	// Return the number of ancestral nodes from this node
+unsigned long ARGNode::getNAncestors() const	// Return the number of ancestral nodes from this node
 {
 	return(ancestor.size());
 }
@@ -173,14 +175,14 @@ ARGNode* ARGNode::getAncestor(unsigned long i)	// Get ancestral node i
 
 
 
-unsigned long ARGNode::getNDescendants()	// Return the number of descendant nodes from this node
+unsigned long ARGNode::getNDescendants() const	// Return the number of descendant nodes from this node
 {
 	return(descendant.size());
 }
 
 
 
-shared_ptr<ARGNode> ARGNode::getDescendantNode(unsigned long i)	// Get descendant ARG node i
+shared_ptr<ARGNode> ARGNode::getDescendantNode(unsigned long i) const	// Get descendant ARG node i
 {
 	// For debugging:
 	//	cout << "   ARGNode::getDescendant:  Getting descendant[" << i << "]..." << endl;
@@ -196,7 +198,7 @@ shared_ptr<ARGNode> ARGNode::getDescendantNode(unsigned long i)	// Get descendan
 
 
 
-vector< Segment > ARGNode::getDescendantSegmentVector(unsigned long i)
+vector< Segment > ARGNode::getDescendantSegmentVector(unsigned long i) const
 //
 // Get the vector of chromosome segments corresponding to the branch leading to descendant i
 //
@@ -280,6 +282,68 @@ void ARGNode::outputARG()	// Prints out the ARG descending from this node
 	}
 }
 
+void ARGNode::gatherAllNodes(unordered_set<const ARGNode*>& seen, vector<const ARGNode*>& out) const
+{
+	if (time < 0) return; // skip dummy nodes
+	if (!seen.insert(this).second) return;
+	out.push_back(this);
+	for (size_t i = 0; i < descendant.size(); ++i) {
+		const auto &child = descendant.at(i).node;
+		if (child) {
+			child->gatherAllNodes(seen, out);
+		}
+	}
+}
+
+void ARGNode::writeDOT(const string &filename) const
+{
+	unordered_set<const ARGNode*> seen;
+	vector<const ARGNode*> nodes;
+	gatherAllNodes(seen, nodes);
+
+	std::ofstream outFile(filename.c_str());
+	if (!outFile.is_open()) {
+		std::cerr << "Error: Could not open file " << filename << " for writing.\n";
+		return;
+	}
+
+	outFile << "digraph ARGTree {\n";
+	outFile << "  node [shape=circle];\n";
+
+	for (const auto *node : nodes) {
+		if (!node) continue;
+		if (node->getTime() < 0) continue;
+		const Context ctx = node->getContext();
+		outFile << "  node" << node->getNodeNumber()
+		        << " [label=\""
+		        << node->getNodeNumber()
+		        << "\\ninv=" << ctx.inversion
+		        << " pop=" << ctx.pop
+		        << "\\nt=" << node->getTime()
+		        << "\"];\n";
+	}
+
+	for (const auto *node : nodes) {
+		if (!node) continue;
+		if (node->getTime() < 0) continue;
+		const unsigned long parent_id = node->getNodeNumber();
+		const unsigned long nDesc = node->getNDescendants();
+		for (unsigned long i = 0; i < nDesc; ++i) {
+			shared_ptr<ARGNode> child = node->getDescendantNode(i);
+			if (!child) continue;
+			if (child->getTime() < 0) continue;
+			const Context pctx = node->getContext();
+			const char *edge_color = (pctx.inversion == 1) ? "lightskyblue" : "black";
+			outFile << "  node" << parent_id
+			        << " -> node" << child->getNodeNumber()
+			        << " [color=\"" << edge_color << "\"];\n";
+		}
+	}
+
+	outFile << "}\n";
+	outFile.close();
+}
+
 Branch::Branch(shared_ptr<ARGNode> n, vector<Segment> segVec){
 	node= n;
 	segmentVec= segVec;
@@ -300,5 +364,3 @@ void Branch::operator =(const Branch& br){
 	segmentVec= br.segmentVec;
 	
 }
-
-

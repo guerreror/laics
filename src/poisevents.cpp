@@ -118,7 +118,13 @@ unsigned short World::coalescePoisson (){
 				int ranParent = randint(0, nLocalChromos-1);
 				if( ranParent < coalescers.size()){			//coalescence happened
 					totalEvents++;
-					shared_ptr<Chromosome> receiver = coalescers.at(ranParent);
+                    shared_ptr<Chromosome> receiver = coalescers.at(ranParent);
+                    if (!(receiver->getContext() == who->getContext())) {
+                        std::cerr << "Error: attempted coalescence of different contexts in coalescePoisson. "
+                                  << "ctx1(pop=" << receiver->getContext().pop << ",inv=" << receiver->getContext().inversion << ") "
+                                  << "ctx2(pop=" << who->getContext().pop << ",inv=" << who->getContext().inversion << ")\n";
+                        continue;
+                    }
 					
 					// Make a new ARG node: 
 					//

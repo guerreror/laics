@@ -465,6 +465,12 @@ unsigned short World::coalesceEvent(vector<double>& rate, double total){
         
         shared_ptr<Chromosome> chrom = worldData->carriers->at(c).at(carr_idx.at(0));
         shared_ptr<Chromosome> chrom2 = worldData->carriers->at(c).at(carr_idx.at(1));
+        if (!(chrom->getContext() == chrom2->getContext())) {
+            std::cerr << "Error: attempted coalescence of different contexts in coalesceEvent. "
+                      << "ctx1(pop=" << chrom->getContext().pop << ",inv=" << chrom->getContext().inversion << ") "
+                      << "ctx2(pop=" << chrom2->getContext().pop << ",inv=" << chrom2->getContext().inversion << ")\n";
+            return 0;
+        }
         
         shared_ptr < ARGNode > newNode ;
         newNode.reset(  new ARGNode(worldData->argNodeVec.size(), chrom, chrom2, worldData->generation) );
@@ -621,10 +627,14 @@ shared_ptr<Chromosome> World::recomb_Wrap(shared_ptr<Chromosome> chrom, bool het
     newNode.reset(new ARGNode(worldData->argNodeVec.size(), chrom, worldData->generation));
     
     
+    // Track inversion state changes across this event
+    const int inv_before = chrom->getInv();
+
     // Make two recombinant chromosomes	
     shared_ptr<Chromosome> chrom2;
     int h= static_cast<int> (hetero); if (chrom->getInv()==h) {h=0;} else {h=1;}
     Context other_ctx (chrom->getPopulation(), h);				
+    const int inv2_before = other_ctx.inversion;
     
     if(gflux){
         double mid= (worldData->invRange.R - worldData->invRange.L)/2 + worldData->invRange.L;
@@ -653,6 +663,14 @@ shared_ptr<Chromosome> World::recomb_Wrap(shared_ptr<Chromosome> chrom, bool het
     // add ARGnode to the vector of nodes
     if(!chrom2->isEmpty() && !chrom->isEmpty()) {
         worldData->argNodeVec.push_back(newNode);
+    }
+    
+    // Record explicit context-flip nodes if inversion state changed
+    if (!chrom->isEmpty() && chrom->getInv() != inv_before) {
+        recordContextFlip(chrom);
+    }
+    if (!chrom2->isEmpty() && chrom2->getInv() != inv2_before) {
+        recordContextFlip(chrom2);
     }
     
     return chrom2;

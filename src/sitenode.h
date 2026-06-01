@@ -75,10 +75,10 @@ struct snpHit;
 	 int calcBranchLengths_informative(int nCall);
  
 	 // Accessors:
-	 unsigned long getNodeNumber() { return nodeNumber; }
-	 double getTime() { return time; }
-	 Context getContext() { return context; }
-	 Base getBaseState() { return baseState.back(); }
+	 unsigned long getNodeNumber() const { return nodeNumber; }
+	 double getTime() const { return time; }
+	 Context getContext() const { return context; }
+	 Base getBaseState() const { return baseState.back(); }
  
 	 // New functions for CSV export:
 	 void gatherAllNodes(vector<SiteNode*>& allNodes);
