@@ -430,8 +430,13 @@ def _collect_per_pop_strings(parameters: dict, pops: int, random_flag: str):
         raise ValueError(f"randomSample==0: pop0 string 'tempRead' must have exactly 2 integers, got {len(vals0)}.")
     per_pop.append(parameters["tempRead"])
 
-    # remaining pops from nCarriers, nCarriers1, nCarriers2, ...
-    carriers_keys = ["nCarriers"] + [f"nCarriers{i}" for i in range(1, pops-1)]
+    # pop0 is represented by tempRead above. Additional populations use
+    # nCarriers for pop1, nCarriers1 for pop2, nCarriers2 for pop3, etc.
+    # For one-pop models, range(1, pops) is empty, so tempRead is the only
+    # sample string passed to C++.
+    carriers_keys = []
+    if pops > 1:
+        carriers_keys = ["nCarriers"] + [f"nCarriers{i}" for i in range(1, pops-1)]
     for idx, key in enumerate(carriers_keys, start=1):
         if key not in parameters:
             raise ValueError(f"randomSample==0: missing per-pop string for pop{idx}: '{key}'.")
