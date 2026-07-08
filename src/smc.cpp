@@ -563,7 +563,7 @@ int main(int argc, const char *argv[])
         }
 
         delete world;
-        break;
+        //break;
     }
 
     end = std::chrono::system_clock::now();
