@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 import sys
+import os
 import yaml
 import demes
 import subprocess
 import argparse
 import re
 import random
+from datetime import datetime
 from collections import defaultdict, deque
 
 # ---------- File paths ----------
@@ -13,6 +15,7 @@ PARAMETERS_YAML      = "src/parameters.yaml"
 DEMES_YAML      = "src/demes.yaml"
 EXECUTABLE_ARG  = "./executables/labp_v21"
 EXECUTABLE_SMC  = "./executables/labp_smc"
+DEFAULT_OUTPUT_ROOT = "laics_output"
 
 # ---------- Defaults ----------
 parameters = {
@@ -39,6 +42,7 @@ parameters = {
     "smc":          "0",
     "verbose":      "1",
     "target_snp":   "",
+    "outputRoot":   DEFAULT_OUTPUT_ROOT,
 }
 
 # ---------- Helpers for demes ----------
@@ -460,9 +464,22 @@ args_list = [parameters[k] for k in base_keys_order] + per_pop_strings
 if smc_flag == "1":
     args_list += [parameters["verbose"], parameters["target_snp"]]
 
+output_root = os.environ.get("LAICS_OUTPUT_ROOT", parameters.get("outputRoot", DEFAULT_OUTPUT_ROOT))
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+seed_label = re.sub(r"[^A-Za-z0-9_.-]+", "_", parameters.get("seed", "seed"))
+run_mode = "smc" if smc_flag == "1" else "arg"
+output_dir = os.path.join(output_root, f"run_{timestamp}_seed{seed_label}_{run_mode}")
+trees_dir = os.path.join(output_dir, "trees")
+try:
+    os.makedirs(trees_dir, exist_ok=False)
+except OSError as e:
+    print(f"Error creating output directory {output_dir}: {e}", file=sys.stderr)
+    sys.exit(1)
+
 print("\nFinal parameters being passed:")
 for k in base_keys_order:
     print(f"{k}: {parameters[k]}")
+print(f"output_dir: {output_dir}")
     
 # Print the tail clearly
 if random_flag == "1":
@@ -478,9 +495,9 @@ if smc_flag == "1":
 
 try:
     proc = subprocess.Popen(
-        [EXECUTABLE] + args_list,
+        [EXECUTABLE] + args_list + [output_dir],
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
     )
@@ -489,14 +506,14 @@ except FileNotFoundError:
     sys.exit(1)
 
 print("\nC++ Program Output:\n")
-stderr_lines = []
+output_lines = []
 while True:
-    line = proc.stderr.readline()
+    line = proc.stdout.readline()
     if line == "" and proc.poll() is not None:
         break
     if line:
         print(line, end="")
-        stderr_lines.append(line)
+        output_lines.append(line)
 
 if proc.returncode != 0:
     print(f"\nExecutable exited with code {proc.returncode}", file=sys.stderr)
@@ -507,5 +524,5 @@ write_output_log = (
     or bool(parameters.get("target_snp", "").strip())
 )
 if write_output_log:
-    with open("Output_log.txt", "w") as log_file:
-        log_file.writelines(stderr_lines)
+    with open(os.path.join(output_dir, "Output_log.txt"), "w") as log_file:
+        log_file.writelines(output_lines)

@@ -1,26 +1,104 @@
-# src/other.yaml
-
+#1 pop SNM
 seed: "0"
-nruns: "1"
+nruns: "10"
+
 kingman_coal: "1"
 drift_sim: "0"
-msOutput: "1"
-inv_freq: "0.2 0.2"
-inv_age: "10000"
-BasesPerMorgan: "1e8"
-randPhi: "0"
-phi: "0.00001"
-invRange: "0 1e3"
-fixedSNPs: "1 10 1e-6"
-randSNPs: "1"
-snpPositions: "0"
-randomSample: "0"
-tempRead: "0 10"
-nCarriers: "10 0"
-nCarriers1: "10 0"
-nCarriers2: "10 0"
+msOutput: "0"
+
+inv_freq: "0"
 ancestor_frequencies:
-  root: 0.2
+  root: 0
+
+inv_age: "10000"
+randPhi: "0"
+phi: "0"
+migRate: "0"
+
+BasesPerMorgan: "1e8"
+invRange: "0 1000000"
+
+# Include x=0 and a few positions moving away from 0
+fixedSNPs: "1 2 1e-6"
+randSNPs: "0"
+snpPositions: "0 500000"
+
+randomSample: "0"
+writeTrees: "0"
+
+tempRead: "2 0"     # pop0: one standard
+nCarriers: "0 0" # only here to satisfy current wrapper bug for 1-pop runs
+
+# SMC run
 smc: "1"
-verbose: "1"
-target_snp: ""
+
+# output directory
+outputRoot: "/share/guerrerolab/baturne5/laics_output/diag/"
+
+#____________________________________________________________________________
+#2 pop SNM
+
+# seed: "0"
+# nruns: "10"
+
+# kingman_coal: "1"
+# drift_sim: "0"
+# msOutput: "0"
+
+# inv_freq: "0 0"
+# ancestor_frequencies:
+#   root: 0
+
+# inv_age: "10000"
+# randPhi: "0"
+# phi: "0"
+
+# migRate: "0"
+
+# BasesPerMorgan: "1e8"
+# invRange: "0 1000000"
+
+# # Include x=0 and a few positions moving away from 0
+# fixedSNPs: "1 2 1e-6"
+# randSNPs: "0"
+# snpPositions: "0 500000"
+
+# randomSample: "0"
+
+# tempRead: "1 0"     # pop0: one standard
+# nCarriers: "1 0"    # pop1: one standard
+
+# # SMC (1) or arg run
+# smc: "1"
+
+# # output trees
+# verbose: "1"
+
+
+
+
+# seed: "0"
+# nruns: "1"
+# kingman_coal: "1"
+# drift_sim: "0"
+# msOutput: "1"
+# inv_freq: "0.2 0.2"
+# inv_age: "10000"
+# BasesPerMorgan: "1e8"
+# randPhi: "0"
+# phi: "0.00001"
+# invRange: "0 1e3"
+# fixedSNPs: "1 10 1e-6"
+# randSNPs: "1"
+# snpPositions: "0"
+# randomSample: "0"
+# tempRead: "0 10"
+# nCarriers: "10 0"
+# nCarriers1: "10 0"
+# nCarriers2: "10 0"
+# ancestor_frequencies:
+#   root: 0.2
+# smc: "1"
+# verbose: "1"
+# target_snp: ""
+# src/other.yaml

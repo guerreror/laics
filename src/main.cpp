@@ -44,6 +44,18 @@ std::random_device rd;
 auto seed = rd();
 std::mt19937_64 gen(seed); // Random generator declared globally.
 
+static bool looksLikePathArg(const string& s)
+{
+    return s == "." || s.find('/') != string::npos || s.find('\\') != string::npos;
+}
+
+static string pathJoin(const string& dir, const string& file)
+{
+    if (dir.empty() || dir == ".") return file;
+    if (dir.back() == '/' || dir.back() == '\\') return dir + file;
+    return dir + "/" + file;
+}
+
 vector<vector<double>> buildMigMatrix(Parameters &p)
 {
     unsigned int nPops = static_cast<int>(p.paramData->popSizeVec.size());
@@ -102,11 +114,24 @@ int main(int argc, const char *argv[])
 
     stringstream infile, ms_ss, sstat_ss;
     infile << "inLABP.pars";  // (dummy; actual parameters are passed via the Python wrapper)
-    ms_ss << "tests/outLABP_" << seed << ".sites";
-    sstat_ss << "tests/outLABP_" << seed << ".stats";
+
+    int param_arg_end = argc;
+    string output_dir = ".";
+    if (argc > 2 && looksLikePathArg(argv[argc - 1])) {
+        output_dir = argv[argc - 1];
+        param_arg_end = argc - 1;
+    }
+
+    if (output_dir == ".") {
+        ms_ss << "tests/outLABP_" << seed << ".sites";
+        sstat_ss << "tests/outLABP_" << seed << ".stats";
+    } else {
+        ms_ss << pathJoin(output_dir, "outLABP_" + std::to_string(seed) + ".sites");
+        sstat_ss << pathJoin(output_dir, "outLABP_" + std::to_string(seed) + ".stats");
+    }
 
     // Collect remaining command-line arguments (starting at argv[2]) as parameter strings.
-    vector<string> param_vec(argv + 2, argv + argc);
+    vector<string> param_vec(argv + 2, argv + param_arg_end);
     // Construct Parameters using these values.
     Parameters params(infile.str().c_str(), param_vec);
 
