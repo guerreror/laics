@@ -330,6 +330,16 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
             paramData->targetSNPs.end());
     }
 
+    paramData->gcRate = 1.0;
+    if (param_vec.size() > outputBase + 2) {
+        paramData->gcRate = std::stod(param_vec[outputBase + 2]);
+    }
+
+    paramData->drRate = 1.0;
+    if (param_vec.size() > outputBase + 3) {
+        paramData->drRate = std::stod(param_vec[outputBase + 3]);
+    }
+
     std::cerr << "SMC verbose diagnostics? " << paramData->smcVerbose << '\n';
     if (paramData->targetSNPs.empty()) {
         std::cerr << "SMC target SNP diagnostics: none\n";
@@ -340,6 +350,8 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
         }
         std::cerr << '\n';
     }
+    std::cerr << "SMC GC rectangle height = " << paramData->gcRate << '\n';
+    std::cerr << "SMC DR triangle peak height = " << paramData->drRate << '\n';
 }
 
 Parameters::~Parameters(){

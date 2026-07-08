@@ -10,6 +10,7 @@ struct GeneFluxEvent_SMC {
     double startX = -1.0;
     double endX = -1.0;
     unsigned long nodeId = 0;
+    std::string type;
 };
 
 struct SMCEpochs_SMC {

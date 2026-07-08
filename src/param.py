@@ -39,6 +39,8 @@ parameters = {
     "smc":          "0",
     "verbose":      "1",
     "target_snp":   "",
+    "gc":           "1.0",
+    "dr":           "1.0",
 }
 
 # ---------- Helpers for demes ----------
@@ -458,7 +460,7 @@ per_pop_strings = _collect_per_pop_strings(parameters, pops, random_flag)
 # Compose final argv list
 args_list = [parameters[k] for k in base_keys_order] + per_pop_strings
 if smc_flag == "1":
-    args_list += [parameters["verbose"], parameters["target_snp"]]
+    args_list += [parameters["verbose"], parameters["target_snp"], parameters["gc"], parameters["dr"]]
 
 print("\nFinal parameters being passed:")
 for k in base_keys_order:
@@ -475,6 +477,8 @@ else:
 if smc_flag == "1":
     print(f"verbose: {parameters['verbose']}")
     print(f"target_snp: {parameters['target_snp']}")
+    print(f"gc: {parameters['gc']}")
+    print(f"dr: {parameters['dr']}")
 
 try:
     proc = subprocess.Popen(

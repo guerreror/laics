@@ -504,18 +504,20 @@ int main(int argc, const char *argv[])
         if (writeAllDiagnostics) {
             std::ofstream gf_active("smc_gene_flux_active.csv");
             if (gf_active.is_open()) {
-                gf_active << "x_start,x_end,node_id\n";
+                gf_active << "x_start,x_end,node_id,type\n";
                 for (const auto& evt : geneFluxActive) {
-                    gf_active << evt.startX << "," << evt.endX << "," << evt.nodeId << "\n";
+                    gf_active << evt.startX << "," << evt.endX << "," << evt.nodeId
+                              << "," << evt.type << "\n";
                 }
             }
         }
         if (writeAllDiagnostics) {
             std::ofstream gf_log("smc_gene_flux_log.csv");
             if (gf_log.is_open()) {
-                gf_log << "x_start,x_end,node_id\n";
+                gf_log << "x_start,x_end,node_id,type\n";
                 for (const auto& evt : geneFluxLog) {
-                    gf_log << evt.startX << "," << evt.endX << "," << evt.nodeId << "\n";
+                    gf_log << evt.startX << "," << evt.endX << "," << evt.nodeId
+                           << "," << evt.type << "\n";
                 }
             }
         }
