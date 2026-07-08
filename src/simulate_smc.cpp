@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <sstream>
 #include <utility>
 #include <vector>
 
@@ -23,6 +24,23 @@ using std::map;
 using std::vector;
 
 static const double SMC_DEBUG_MIGRATION_BOOST = 1.0;
+
+static void recordEventRow_SMC(SMCStepOutcome* outcome,
+                               std::ofstream& evlog,
+                               int hopIndex,
+                               double currentHopX,
+                               const std::string& eventName,
+                               double eventTime) {
+    std::ostringstream row;
+    row << hopIndex << "," << currentHopX << "," << eventName << ","
+        << eventTime << ",,,\n";
+    if (outcome) {
+        outcome->eventRows.push_back(row.str());
+    }
+    if (evlog.is_open()) {
+        evlog << row.str();
+    }
+}
 
 static void gatherTimes_SMC(TreeNode* node, std::vector<double>& out) {
     if (!node) return;
@@ -63,24 +81,19 @@ static double computeTotalC_SMC(const Parameters::ParameterData& params) {
     return 1.0 / static_cast<double>(params.totalPopSize);
 }
 
-static double computeTotalG_SMC(const TreeNode* /*cutRoot*/,
+static double computeTotalG_SMC(const TreeNode* cutRoot,
                                 const Parameters::ParameterData& params,
-                                double currentHopX) {
-    const double phi_max = params.phi;
-    const double x_min = params.invRange.L;
-    const double x_max = params.invRange.R;
-    const double L = x_max - x_min;
-    if (L <= 0.0) return 0.0;
-    const double x_mid = x_min + 0.5 * L;
+                                double /*currentHopX*/) {
+    if (!cutRoot) return 0.0;
+    const unsigned int pop = cutRoot->context.pop;
+    if (pop >= params.initialFreqs.size()) return 0.0;
 
-    double x = currentHopX;
-    if (x < x_min) x = x_min;
-    if (x > x_max) x = x_max;
-
-    if (x <= x_mid) {
-        return phi_max * (x - x_min) / (0.5 * L);
+    const double invFreq = params.initialFreqs[pop];
+    const double stdFreq = 1.0 - invFreq;
+    if (cutRoot->context.inversion == 0) {
+        return params.phi * invFreq;
     }
-    return phi_max * (x_max - x) / (0.5 * L);
+    return params.phi * stdFreq;
 }
 
 static double drawGeneFluxSegmentLength_SMC(double /*currentHopX*/) {
@@ -99,9 +112,9 @@ static unsigned int pickMigrationDest_SMC(unsigned int fromPop,
     return fromPop;
 }
 
-static bool canCoalesceByInversion_SMC(const TreeNode* a, const TreeNode* b) {
+static bool canCoalesceByContext_SMC(const TreeNode* a, const TreeNode* b) {
     if (!a || !b) return false;
-    return a->context.inversion == b->context.inversion;
+    return a->context == b->context;
 }
 
 static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
@@ -156,7 +169,7 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
             std::vector<std::pair<size_t, size_t>> pairs;
             for (size_t i = 0; i < lineages.size(); ++i) {
                 for (size_t j = i + 1; j < lineages.size(); ++j) {
-                    if (canCoalesceByInversion_SMC(lineages[i], lineages[j])) {
+                    if (canCoalesceByContext_SMC(lineages[i], lineages[j])) {
                         pairs.push_back({i, j});
                     }
                 }
@@ -180,9 +193,7 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
             lineages.erase(lineages.begin() + static_cast<long>(j));
             lineages.erase(lineages.begin() + static_cast<long>(i));
             lineages.push_back(coal);
-            if (evlog.is_open()) {
-                evlog << hopIndex << "," << currentHopX << ",coalescence_fallback," << event_time << ",,,\n";
-            }
+            recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX, "coalescence_fallback", event_time);
             continue;
         }
 
@@ -194,9 +205,7 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
                 newCtx.pop = pickMigrationDest_SMC(newCtx.pop, mig_prob);
                 TreeNode* nr = addUnaryAbove(lineages[i], nextId++, event_time, newCtx);
                 if (nr && nr->parent == nullptr) lineages[i] = nr;
-                if (evlog.is_open()) {
-                    evlog << hopIndex << "," << currentHopX << ",migration_fallback," << event_time << ",,,\n";
-                }
+                recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX, "migration_fallback", event_time);
                 handled = true;
                 break;
             }
@@ -209,14 +218,12 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
                 if (nr && nr->parent == nullptr) lineages[i] = nr;
                 if (outcome) {
                     GeneFluxEvent_SMC evt;
-                    evt.startX = std::max(params.invRange.L, std::min(params.invRange.R, currentHopX));
-                    evt.endX = std::max(evt.startX, std::min(params.invRange.R, evt.startX + drawGeneFluxSegmentLength_SMC(currentHopX)));
+                    evt.startX = std::max(params.smcRange.L, std::min(params.smcRange.R, currentHopX));
+                    evt.endX = std::max(evt.startX, std::min(params.smcRange.R, evt.startX + drawGeneFluxSegmentLength_SMC(currentHopX)));
                     evt.nodeId = nr ? nr->id : 0;
                     outcome->geneFluxEvents.push_back(evt);
                 }
-                if (evlog.is_open()) {
-                    evlog << hopIndex << "," << currentHopX << ",gene_flux_fallback," << event_time << ",,,\n";
-                }
+                recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX, "gene_flux_fallback", event_time);
                 handled = true;
                 break;
             }
@@ -249,7 +256,10 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
     }
 
     const double root_time = mainRoot->time;
-    std::ofstream evlog(eventLogPath.c_str(), std::ios::app);
+    std::ofstream evlog;
+    if (!eventLogPath.empty()) {
+        evlog.open(eventLogPath.c_str(), std::ios::app);
+    }
     if (evlog.is_open() && evlog.tellp() == 0) {
         evlog << "hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
     }
@@ -302,11 +312,11 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
             if (newRoot->parent == nullptr) {
                 cutRoot = newRoot;
             }
-            if (evlog.is_open()) evlog << hopIndex << "," << currentHopX << ",migration," << event_time << ",,,\n";
+            recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX, "migration", event_time);
         } else if (is_coalescence) {
             unsigned long nextId = std::max(getMaxId(mainRoot), getMaxId(cutRoot)) + 1;
             if (reattachAtTimeWithContext(mainRoot, cutRoot, event_time, cutRoot->context, nextId)) {
-                if (evlog.is_open()) evlog << hopIndex << "," << currentHopX << ",coalescence," << event_time << ",,,\n";
+                recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX, "coalescence", event_time);
                 if (outcome) {
                     outcome->coalesced = true;
                     outcome->hitRootLimit = false;
@@ -340,13 +350,13 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
             const double J = drawGeneFluxSegmentLength_SMC(currentHopX);
             if (outcome) {
                 GeneFluxEvent_SMC evt;
-                evt.startX = std::max(params.invRange.L, std::min(params.invRange.R, nextGeneFluxStartX));
-                evt.endX = std::max(evt.startX, std::min(params.invRange.R, evt.startX + J));
+                evt.startX = std::max(params.smcRange.L, std::min(params.smcRange.R, nextGeneFluxStartX));
+                evt.endX = std::max(evt.startX, std::min(params.smcRange.R, evt.startX + J));
                 evt.nodeId = nextId;
                 outcome->geneFluxEvents.push_back(evt);
             }
-            nextGeneFluxStartX = std::min(params.invRange.R, nextGeneFluxStartX + J);
-            if (evlog.is_open()) evlog << hopIndex << "," << currentHopX << ",gene_flux," << event_time << ",,,\n";
+            nextGeneFluxStartX = std::min(params.smcRange.R, nextGeneFluxStartX + J);
+            recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX, "gene_flux", event_time);
         }
     }
 

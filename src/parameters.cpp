@@ -171,9 +171,13 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
     iss.clear();
     iss.str(param_vec[13]);
     invtemp = vector<double>(std::istream_iterator<double>(iss), std::istream_iterator<double>());
+    paramData->smcRange.L = invtemp[0];
+    paramData->smcRange.R = invtemp[1];
     paramData->invRange.L = invtemp[0] / paramData->BasesPerMorgan;
     paramData->invRange.R = invtemp[1] / paramData->BasesPerMorgan;
-    std::cerr << "Inversion from: " << invtemp[0] << " to " << invtemp[1] << " (" << paramData->invRange.L << " - " << paramData->invRange.R << " recUnits)\n";
+    std::cerr << "Inversion from: " << invtemp[0] << " to " << invtemp[1]
+              << " raw SMC units (" << paramData->invRange.L << " - "
+              << paramData->invRange.R << " ARG recUnits)\n";
 
     // Fixed S and Theta (param_vec[14])
     vector<double> stemp;
@@ -307,6 +311,35 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
 
 
 
+    const std::size_t outputBase = base + (randomSample ? 1 : pops);
+    paramData->smcVerbose = true;
+    if (param_vec.size() > outputBase) {
+        paramData->smcVerbose = (param_vec[outputBase] == "1");
+    }
+
+    paramData->targetSNPs.clear();
+    if (param_vec.size() > outputBase + 1) {
+        iss.clear();
+        iss.str(param_vec[outputBase + 1]);
+        while (iss >> doubtemp) {
+            paramData->targetSNPs.push_back(doubtemp);
+        }
+        sort(paramData->targetSNPs.begin(), paramData->targetSNPs.end());
+        paramData->targetSNPs.erase(
+            std::unique(paramData->targetSNPs.begin(), paramData->targetSNPs.end()),
+            paramData->targetSNPs.end());
+    }
+
+    std::cerr << "SMC verbose diagnostics? " << paramData->smcVerbose << '\n';
+    if (paramData->targetSNPs.empty()) {
+        std::cerr << "SMC target SNP diagnostics: none\n";
+    } else {
+        std::cerr << "SMC target SNP diagnostics (raw units): ";
+        for (double x : paramData->targetSNPs) {
+            std::cerr << x << " ";
+        }
+        std::cerr << '\n';
+    }
 }
 
 Parameters::~Parameters(){

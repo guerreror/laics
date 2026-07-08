@@ -37,6 +37,8 @@ parameters = {
     "randomSample": "0",
     "tempRead":     "10 0",
     "smc":          "0",
+    "verbose":      "1",
+    "target_snp":   "",
 }
 
 # ---------- Helpers for demes ----------
@@ -455,6 +457,8 @@ per_pop_strings = _collect_per_pop_strings(parameters, pops, random_flag)
 
 # Compose final argv list
 args_list = [parameters[k] for k in base_keys_order] + per_pop_strings
+if smc_flag == "1":
+    args_list += [parameters["verbose"], parameters["target_snp"]]
 
 print("\nFinal parameters being passed:")
 for k in base_keys_order:
@@ -468,6 +472,9 @@ else:
     for i in range(1, pops):
         key = "nCarriers" if i == 1 else f"nCarriers{i-1}"
         print(f"{key} (pop{i}): {parameters[key]}")
+if smc_flag == "1":
+    print(f"verbose: {parameters['verbose']}")
+    print(f"target_snp: {parameters['target_snp']}")
 
 try:
     proc = subprocess.Popen(
@@ -494,5 +501,11 @@ while True:
 if proc.returncode != 0:
     print(f"\nExecutable exited with code {proc.returncode}", file=sys.stderr)
 
-with open("Output_log.txt", "w") as log_file:
-    log_file.writelines(stderr_lines)
+write_output_log = (
+    smc_flag != "1"
+    or parameters.get("verbose", "1").strip() == "1"
+    or bool(parameters.get("target_snp", "").strip())
+)
+if write_output_log:
+    with open("Output_log.txt", "w") as log_file:
+        log_file.writelines(stderr_lines)

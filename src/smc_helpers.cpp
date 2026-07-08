@@ -5,6 +5,44 @@
 #include <vector>
 #include <functional>
 
+static bool segmentCarriesSite(double x, const std::vector<Segment>& segments) {
+    for (const auto& s : segments) {
+        if ((s.L < x && x < s.R) || s.L == x) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static TreeNode* buildX0TreeRec(double x0, const std::shared_ptr<ARGNode>& argNode, TreeNode* parent) {
+    if (!argNode || argNode->getTime() < 0) return nullptr;
+
+    TreeNode* node = new TreeNode();
+    node->id = argNode->getNodeNumber();
+    node->time = argNode->getTime();
+    node->context = argNode->getContext();
+    node->parent = parent;
+
+    const unsigned long nDesc = argNode->getNDescendants();
+    for (unsigned long i = 0; i < nDesc; ++i) {
+        const std::vector<Segment> segments = argNode->getDescendantSegmentVector(i);
+        if (!segmentCarriesSite(x0, segments)) {
+            continue;
+        }
+
+        TreeNode* child = buildX0TreeRec(x0, argNode->getDescendantNode(i), node);
+        if (child) {
+            node->children.push_back(child);
+        }
+    }
+
+    return node;
+}
+
+TreeNode* buildX0TreeFromARGPreserveUnary(double x0, std::shared_ptr<ARGNode> argRoot) {
+    return buildX0TreeRec(x0, argRoot, nullptr);
+}
+
 static bool isLeaf(const TreeNode* n) {
     return n && n->children.empty();
 }
@@ -80,4 +118,3 @@ void writeCollapsedTreeDOT(TreeNode* root, const std::string& filename) {
 
     out << "}\n";
 }
-

@@ -163,6 +163,44 @@ static void collectEdgeWeightsFromTree(
     }
 }
 
+static void writeEdgeWeightsCSV(const vector<EdgeWeight>& edges, const std::string& path)
+{
+    std::ofstream out(path.c_str());
+    if (!out.is_open()) return;
+    out << "parent,child,weight\n";
+    for (const auto& e : edges) {
+        out << e.parent << "," << e.child << "," << e.weight << "\n";
+    }
+}
+
+static void writeTreeArtifacts(TreeNode* tree, const std::string& base)
+{
+    const std::string dot = base + ".dot";
+    const std::string collapsedDot = base + "_collapsed.dot";
+    writeTreeDOT(tree, dot);
+    writeCollapsedTreeDOT(tree, collapsedDot);
+
+    std::ostringstream cmd;
+    cmd << "python3 tools/dot_to_tskit_png.py "
+        << dot
+        << " --svg " << base << ".tskit.svg";
+    const int rc = std::system(cmd.str().c_str());
+    if (rc != 0) {
+        std::cerr << "Warning: failed to render " << dot
+                  << " to tskit SVG.\n";
+    }
+
+    std::ostringstream cmdCollapsed;
+    cmdCollapsed << "python3 tools/dot_to_tskit_png.py "
+                 << collapsedDot
+                 << " --svg " << base << "_collapsed.tskit.svg";
+    const int rcCollapsed = std::system(cmdCollapsed.str().c_str());
+    if (rcCollapsed != 0) {
+        std::cerr << "Warning: failed to render " << collapsedDot
+                  << " to tskit SVG.\n";
+    }
+}
+
 int main(int argc, const char *argv[])
 {
     std::cerr << "Random Seed: " << seed << '\n';
@@ -186,6 +224,8 @@ int main(int argc, const char *argv[])
 
     unsigned int nRuns = params.paramData->nRuns;
     unsigned int nSites = params.paramData->n_SNPs;
+    const bool targetMode = !params.paramData->targetSNPs.empty();
+    const bool writeAllDiagnostics = !targetMode && params.paramData->smcVerbose;
 
     const std::string mig_json = "src/migration_matrices.json";
     auto schedule = readMigrationSchedule(mig_json);
@@ -236,33 +276,66 @@ int main(int argc, const char *argv[])
             break;
         }
 
-        const double startX = params.paramData->invRange.L;
-        SiteNode geneTree(startX, allNodes.back());
+        const double startX = params.paramData->smcRange.L;
+        const double argStartX = startX / params.paramData->BasesPerMorgan;
+        SiteNode geneTree(argStartX, allNodes.back());
         geneTree.calcBranchLengths(0);
         geneTree.calcBranchLengths_informative(0);
-        geneTree.writeCSV("genetree_first_site.csv");
-        geneTree.writeDOT("genetree_first_site.dot");
-        allNodes.back()->writeDOT("argtree.dot");
+        if (writeAllDiagnostics) {
+            geneTree.writeCSV("genetree_first_site.csv");
+            geneTree.writeDOT("genetree_first_site.dot");
+            allNodes.back()->writeDOT("argtree.dot");
+        }
 
         const double r = 1.0e5;
-        TreeNode* activeTree = buildEditableTree(geneTree);
+        TreeNode* activeTree = buildX0TreeFromARGPreserveUnary(argStartX, allNodes.back());
+        if (!activeTree) {
+            std::cerr << "Could not build unary-preserving x0 tree from ARG.\n";
+            delete world;
+            break;
+        }
+        if (writeAllDiagnostics) {
+            writeTreeDOT(activeTree, "genetree_x0_arg_unary.dot");
+            writeCollapsedTreeDOT(activeTree, "genetree_x0_arg_unary_collapsed.dot");
+        }
         double currentX = startX;
         vector<GeneFluxEvent_SMC> geneFluxActive;
         vector<GeneFluxEvent_SMC> geneFluxLog;
         vector<EdgeWeight> last_standard_edges;
         vector<EdgeWeight> last_inverted_edges;
-        {
+        vector<bool> targetEmitted(params.paramData->targetSNPs.size(), false);
+        bool hopTraceHeaderWritten = false;
+        bool hopEventsHeaderWritten = false;
+        if (writeAllDiagnostics) {
             std::ofstream hoplog("smc_hop_trace.csv");
             if (hoplog.is_open()) {
                 hoplog << "hop,current_x,raw_delta_x,used_delta_x,next_x,rho,Li_sum,Ls_sum\n";
+                hopTraceHeaderWritten = true;
             }
-        }
-        {
             std::ofstream hop_events("smc_hop_events.csv");
             if (hop_events.is_open()) {
                 hop_events << "hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
+                hopEventsHeaderWritten = true;
             }
         }
+
+        auto ensureHopTraceHeader = [&]() {
+            if (hopTraceHeaderWritten) return;
+            std::ofstream hoplog("smc_hop_trace.csv");
+            if (hoplog.is_open()) {
+                hoplog << "hop,current_x,raw_delta_x,used_delta_x,next_x,rho,Li_sum,Ls_sum\n";
+                hopTraceHeaderWritten = true;
+            }
+        };
+
+        auto ensureHopEventsHeader = [&]() {
+            if (hopEventsHeaderWritten) return;
+            std::ofstream hop_events("smc_hop_events.csv");
+            if (hop_events.is_open()) {
+                hop_events << "hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
+                hopEventsHeaderWritten = true;
+            }
+        };
 
         const int maxHopsSkeleton = 1000;
         for (int hop = 0; hop < maxHopsSkeleton; ++hop) {
@@ -324,7 +397,7 @@ int main(int argc, const char *argv[])
                                             currentX,
                                             hop,
                                             &outcome,
-                                            "smc_hop_events.csv");
+                                            "");
 
             for (const auto& evt : outcome.geneFluxEvents) {
                 geneFluxActive.push_back(evt);
@@ -338,41 +411,14 @@ int main(int argc, const char *argv[])
 
             freeTree(activeTree);
             activeTree = workingTree;
-            {
-                std::ostringstream hopBase;
-                hopBase << "genetree_hop" << (hop + 1);
-                const std::string hopDot = hopBase.str() + ".dot";
-                writeTreeDOT(activeTree, hopDot);
-                const std::string hopCollapsedDot = hopBase.str() + "_collapsed.dot";
-                writeCollapsedTreeDOT(activeTree, hopCollapsedDot);
-
-                std::ostringstream cmd;
-                cmd << "python3 tools/dot_to_tskit_png.py "
-                    << hopDot
-                    << " --svg " << hopBase.str() << ".tskit.svg";
-                const int rc = std::system(cmd.str().c_str());
-                if (rc != 0) {
-                    std::cerr << "Warning: failed to render " << hopDot
-                              << " to tskit SVG.\n";
-                }
-                std::ostringstream cmdCollapsed;
-                cmdCollapsed << "python3 tools/dot_to_tskit_png.py "
-                             << hopCollapsedDot
-                             << " --svg " << hopBase.str() << "_collapsed.tskit.svg";
-                const int rcCollapsed = std::system(cmdCollapsed.str().c_str());
-                if (rcCollapsed != 0) {
-                    std::cerr << "Warning: failed to render " << hopCollapsedDot
-                              << " to tskit SVG.\n";
-                }
-            }
 
             const double rawHopDelta = sampleHopDeltaFromRho(rho);
             if (rawHopDelta <= 0.0) {
                 break;
             }
             double hopDelta = rawHopDelta;
-            if (currentX + hopDelta > params.paramData->invRange.R) {
-                hopDelta = params.paramData->invRange.R - currentX;
+            if (currentX + hopDelta > params.paramData->smcRange.R) {
+                hopDelta = params.paramData->smcRange.R - currentX;
             }
             if (hopDelta <= 0.0) {
                 break;
@@ -393,7 +439,37 @@ int main(int argc, const char *argv[])
                     geneFluxActive.erase(geneFluxActive.begin() + static_cast<long>(minIdx));
                 }
             }
-            {
+
+            bool writeThisHop = writeAllDiagnostics;
+            if (targetMode) {
+                const double eps = 1e-15;
+                for (size_t i = 0; i < params.paramData->targetSNPs.size(); ++i) {
+                    if (targetEmitted[i]) continue;
+                    const double targetX = params.paramData->targetSNPs[i];
+                    if (targetX < currentX - eps) {
+                        targetEmitted[i] = true;
+                        continue;
+                    }
+                    if (targetX <= nextX + eps) {
+                        writeThisHop = true;
+                        targetEmitted[i] = true;
+                    }
+                }
+            }
+
+            if (writeThisHop) {
+                std::ostringstream hopBase;
+                hopBase << "genetree_hop" << (hop + 1);
+                writeTreeArtifacts(activeTree, hopBase.str());
+
+                if (targetMode) {
+                    writeEdgeWeightsCSV(standard_edges, hopBase.str() + "_edge_weights_standard.csv");
+                    writeEdgeWeightsCSV(inverted_edges, hopBase.str() + "_edge_weights_inverted.csv");
+                }
+            }
+
+            if (writeThisHop) {
+                ensureHopTraceHeader();
                 std::ofstream hoplog("smc_hop_trace.csv", std::ios::app);
                 if (hoplog.is_open()) {
                     hoplog << hop << ","
@@ -406,9 +482,13 @@ int main(int argc, const char *argv[])
                            << Ls_sum << "\n";
                 }
             }
-            {
+            if (writeThisHop) {
+                ensureHopEventsHeader();
                 std::ofstream hop_events("smc_hop_events.csv", std::ios::app);
                 if (hop_events.is_open()) {
+                    for (const auto& row : outcome.eventRows) {
+                        hop_events << row;
+                    }
                     hop_events << hop << ","
                                << currentX << ","
                                << "hop_summary,"
@@ -421,7 +501,7 @@ int main(int argc, const char *argv[])
             currentX = nextX;
         }
 
-        {
+        if (writeAllDiagnostics) {
             std::ofstream gf_active("smc_gene_flux_active.csv");
             if (gf_active.is_open()) {
                 gf_active << "x_start,x_end,node_id\n";
@@ -430,7 +510,7 @@ int main(int argc, const char *argv[])
                 }
             }
         }
-        {
+        if (writeAllDiagnostics) {
             std::ofstream gf_log("smc_gene_flux_log.csv");
             if (gf_log.is_open()) {
                 gf_log << "x_start,x_end,node_id\n";
@@ -440,35 +520,25 @@ int main(int argc, const char *argv[])
             }
         }
 
-        writeTreeDOT(activeTree, "genetree_modified.dot");
+        if (writeAllDiagnostics) {
+            writeTreeDOT(activeTree, "genetree_modified.dot");
+        }
         freeTree(activeTree);
 
-        double std_len = 0.0;
-        double inv_len = 0.0;
-        geneTree.getTotalLengthByInversion(std_len, inv_len);
-        std::cerr << "Ls(x) = " << std_len << "\n";
-        std::cerr << "Li(x) = " << inv_len << "\n";
-        std::cerr << "L(x) = " << (std_len + inv_len) << "\n";
-        std::cerr << "L(x) (getTotalLength func) = "
-                  << geneTree.getTotalLength(0.0) << "\n";
-
-        {
-                std::ofstream std_out("edge_weights_standard.csv");
-            if (std_out.is_open()) {
-                std_out << "parent,child,weight\n";
-                for (const auto &e : last_standard_edges) {
-                    std_out << e.parent << "," << e.child << "," << e.weight << "\n";
-                }
-            }
+        if (writeAllDiagnostics) {
+            double std_len = 0.0;
+            double inv_len = 0.0;
+            geneTree.getTotalLengthByInversion(std_len, inv_len);
+            std::cerr << "Ls(x) = " << std_len << "\n";
+            std::cerr << "Li(x) = " << inv_len << "\n";
+            std::cerr << "L(x) = " << (std_len + inv_len) << "\n";
+            std::cerr << "L(x) (getTotalLength func) = "
+                      << geneTree.getTotalLength(0.0) << "\n";
         }
-        {
-            std::ofstream inv_out("edge_weights_inverted.csv");
-            if (inv_out.is_open()) {
-                inv_out << "parent,child,weight\n";
-                for (const auto &e : last_inverted_edges) {
-                    inv_out << e.parent << "," << e.child << "," << e.weight << "\n";
-                }
-            }
+
+        if (writeAllDiagnostics) {
+            writeEdgeWeightsCSV(last_standard_edges, "edge_weights_standard.csv");
+            writeEdgeWeightsCSV(last_inverted_edges, "edge_weights_inverted.csv");
         }
 
         delete world;

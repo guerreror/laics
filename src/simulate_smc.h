@@ -21,6 +21,7 @@ struct SMCStepOutcome {
     bool hitRootLimit = false;
     double stopTime = 0.0;
     std::vector<GeneFluxEvent_SMC> geneFluxEvents;
+    std::vector<std::string> eventRows;
 };
 
 SMCEpochs_SMC buildEpochBreaks_SMC(TreeNode* mainTree, double cut_time);

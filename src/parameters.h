@@ -51,6 +51,7 @@
      unsigned int inv_age;
      std::vector<double> phi_range;
      Segment invRange;
+     Segment smcRange;
      double phi;
      double theta;
      double BasesPerMorgan;
@@ -66,6 +67,8 @@
      std::vector<std::vector<int>> nCarriers;
      std::vector<shared_ptr<Chromosome>> initChr;
      std::vector<double> neut_site;
+     bool smcVerbose;
+     std::vector<double> targetSNPs;
      double timestamp;
      unsigned long totalPopSize;
  };
