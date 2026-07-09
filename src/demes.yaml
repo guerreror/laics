@@ -1,27 +1,35 @@
-description: two pops of size 10000 split from a single ancestor at 10000 generations
+description: single pop
 time_units: generations
 
 demes:
-  # Ancestral deme
-  - name: root
-    epochs:
-      - start_size: 10000
-        end_time: 10000    
-
   - name: pop0
-    start_time: 10000
-    ancestors: [root]
     epochs:
       - start_size: 10000
         end_time: 0
+# description: two pops of size 10000 split from a single ancestor at 10000 generations
+# time_units: generations
 
-  - name: pop1
-    start_time: 10000
-    ancestors: [root]
-    epochs:
-      - start_size: 10000
-        end_time: 0
+# demes:
+#   # Ancestral deme
+#   - name: root
+#     epochs:
+#       - start_size: 10000
+#         end_time: 10000    
 
-migrations:
-  - demes: [pop0, pop1]
-    rate: 0.00005
+#   - name: pop0
+#     start_time: 10000
+#     ancestors: [root]
+#     epochs:
+#       - start_size: 10000
+#         end_time: 0
+
+#   - name: pop1
+#     start_time: 10000
+#     ancestors: [root]
+#     epochs:
+#       - start_size: 10000
+#         end_time: 0
+
+# migrations:
+#   - demes: [pop0, pop1]
+#     rate: 0.00005

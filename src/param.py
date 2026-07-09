@@ -429,7 +429,9 @@ def _collect_per_pop_strings(parameters: dict, pops: int, random_flag: str):
     per_pop.append(parameters["tempRead"])
 
     # remaining pops from nCarriers, nCarriers1, nCarriers2, ...
-    carriers_keys = ["nCarriers"] + [f"nCarriers{i}" for i in range(1, pops-1)]
+    carriers_keys = []
+    if pops > 1:
+        carriers_keys = ["nCarriers"] + [f"nCarriers{i}" for i in range(1, pops-1)]
     for idx, key in enumerate(carriers_keys, start=1):
         if key not in parameters:
             raise ValueError(f"randomSample==0: missing per-pop string for pop{idx}: '{key}'.")

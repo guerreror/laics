@@ -15,6 +15,7 @@
 #include <random>
 #include <algorithm>
 #include <cstdlib>
+#include <iomanip>
 
 using namespace std;
 
@@ -145,8 +146,18 @@ static void collectEdgeWeightsFromTree(
     if (!node) return;
     for (auto* child : node->children) {
         if (!child) continue;
+
+        // Cutting an edge on a unary root stem removes the entire genealogy,
+        // leaving no retained tree for the lineage to reattach to.
+        TreeNode* branchingAncestor = node;
+        while (branchingAncestor && branchingAncestor->children.size() == 1) {
+            branchingAncestor = branchingAncestor->parent;
+        }
+        const bool leavesRetainedTree =
+            branchingAncestor && branchingAncestor->children.size() > 1;
+
         const unsigned int pop = child->context.pop;
-        if (pop < pop_sizes.size() && pop < inv_freqs.size()) {
+        if (leavesRetainedTree && pop < pop_sizes.size() && pop < inv_freqs.size()) {
             const double popN = pop_sizes[pop];
             const double pI = inv_freqs[pop];
             const double branchL = node->time - child->time;
@@ -199,6 +210,19 @@ static void writeTreeArtifacts(TreeNode* tree, const std::string& base)
         std::cerr << "Warning: failed to render " << collapsedDot
                   << " to tskit SVG.\n";
     }
+}
+
+static std::string formatCoordForFilename(double x)
+{
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(6) << x;
+    std::string out = ss.str();
+    while (!out.empty() && out.back() == '0') out.pop_back();
+    if (!out.empty() && out.back() == '.') out.pop_back();
+    std::replace(out.begin(), out.end(), '.', 'p');
+    std::replace(out.begin(), out.end(), '-', 'm');
+    if (out.empty()) out = "0";
+    return out;
 }
 
 int main(int argc, const char *argv[])
@@ -287,7 +311,7 @@ int main(int argc, const char *argv[])
             allNodes.back()->writeDOT("argtree.dot");
         }
 
-        const double r = 1.0e5;
+        const double r = 1.0e-11;
         TreeNode* activeTree = buildX0TreeFromARGPreserveUnary(argStartX, allNodes.back());
         if (!activeTree) {
             std::cerr << "Could not build unary-preserving x0 tree from ARG.\n";
@@ -304,41 +328,19 @@ int main(int argc, const char *argv[])
         vector<EdgeWeight> last_standard_edges;
         vector<EdgeWeight> last_inverted_edges;
         vector<bool> targetEmitted(params.paramData->targetSNPs.size(), false);
-        bool hopTraceHeaderWritten = false;
-        bool hopEventsHeaderWritten = false;
-        if (writeAllDiagnostics) {
+        {
             std::ofstream hoplog("smc_hop_trace.csv");
             if (hoplog.is_open()) {
                 hoplog << "hop,current_x,raw_delta_x,used_delta_x,next_x,rho,Li_sum,Ls_sum\n";
-                hopTraceHeaderWritten = true;
             }
             std::ofstream hop_events("smc_hop_events.csv");
             if (hop_events.is_open()) {
                 hop_events << "hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
-                hopEventsHeaderWritten = true;
             }
         }
 
-        auto ensureHopTraceHeader = [&]() {
-            if (hopTraceHeaderWritten) return;
-            std::ofstream hoplog("smc_hop_trace.csv");
-            if (hoplog.is_open()) {
-                hoplog << "hop,current_x,raw_delta_x,used_delta_x,next_x,rho,Li_sum,Ls_sum\n";
-                hopTraceHeaderWritten = true;
-            }
-        };
-
-        auto ensureHopEventsHeader = [&]() {
-            if (hopEventsHeaderWritten) return;
-            std::ofstream hop_events("smc_hop_events.csv");
-            if (hop_events.is_open()) {
-                hop_events << "hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
-                hopEventsHeaderWritten = true;
-            }
-        };
-
-        const int maxHopsSkeleton = 1000;
-        for (int hop = 0; hop < maxHopsSkeleton; ++hop) {
+        int hop = 0;
+        while (currentX < params.paramData->smcRange.R) {
             vector<EdgeWeight> standard_edges;
             vector<EdgeWeight> inverted_edges;
             collectEdgeWeightsFromTree(activeTree,
@@ -441,6 +443,7 @@ int main(int argc, const char *argv[])
             }
 
             bool writeThisHop = writeAllDiagnostics;
+            vector<double> targetsForThisHop;
             if (targetMode) {
                 const double eps = 1e-15;
                 for (size_t i = 0; i < params.paramData->targetSNPs.size(); ++i) {
@@ -452,24 +455,41 @@ int main(int argc, const char *argv[])
                     }
                     if (targetX <= nextX + eps) {
                         writeThisHop = true;
+                        targetsForThisHop.push_back(targetX);
                         targetEmitted[i] = true;
                     }
                 }
             }
 
             if (writeThisHop) {
-                std::ostringstream hopBase;
-                hopBase << "genetree_hop" << (hop + 1);
-                writeTreeArtifacts(activeTree, hopBase.str());
-
+                vector<std::string> artifactBases;
                 if (targetMode) {
-                    writeEdgeWeightsCSV(standard_edges, hopBase.str() + "_edge_weights_standard.csv");
-                    writeEdgeWeightsCSV(inverted_edges, hopBase.str() + "_edge_weights_inverted.csv");
+                    for (double targetX : targetsForThisHop) {
+                        std::ostringstream targetBase;
+                        targetBase << "genetree_target"
+                                   << formatCoordForFilename(targetX)
+                                   << "_hop" << (hop + 1)
+                                   << "_x" << formatCoordForFilename(currentX)
+                                   << "_to_" << formatCoordForFilename(nextX);
+                        artifactBases.push_back(targetBase.str());
+                    }
+                } else {
+                    std::ostringstream hopBase;
+                    hopBase << "genetree_hop" << (hop + 1);
+                    artifactBases.push_back(hopBase.str());
+                }
+
+                for (const auto& hopBase : artifactBases) {
+                    writeTreeArtifacts(activeTree, hopBase);
+
+                    if (targetMode) {
+                        writeEdgeWeightsCSV(standard_edges, hopBase + "_edge_weights_standard.csv");
+                        writeEdgeWeightsCSV(inverted_edges, hopBase + "_edge_weights_inverted.csv");
+                    }
                 }
             }
 
-            if (writeThisHop) {
-                ensureHopTraceHeader();
+            {
                 std::ofstream hoplog("smc_hop_trace.csv", std::ios::app);
                 if (hoplog.is_open()) {
                     hoplog << hop << ","
@@ -482,8 +502,7 @@ int main(int argc, const char *argv[])
                            << Ls_sum << "\n";
                 }
             }
-            if (writeThisHop) {
-                ensureHopEventsHeader();
+            {
                 std::ofstream hop_events("smc_hop_events.csv", std::ios::app);
                 if (hop_events.is_open()) {
                     for (const auto& row : outcome.eventRows) {
@@ -499,6 +518,7 @@ int main(int argc, const char *argv[])
                 }
             }
             currentX = nextX;
+            ++hop;
         }
 
         if (writeAllDiagnostics) {
