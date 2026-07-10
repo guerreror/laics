@@ -23,6 +23,6 @@ ancestor_frequencies:
   root: 0.2
 smc: "1"
 verbose: "0"
-target_snp: "500"
+target_snp: ""
 gc: "0.00001"
 dr: "0.01"

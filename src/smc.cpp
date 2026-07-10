@@ -376,15 +376,8 @@ int main(int argc, const char *argv[])
                 break;
             }
             TreeNode* cutSubtree = nullptr;
-            unsigned long maxId = 0;
-            std::function<void(TreeNode*)> gather = [&](TreeNode* n){
-                if (!n) return;
-                if (n->id > maxId) maxId = n->id;
-                for (auto* ch : n->children) gather(ch);
-            };
-            gather(workingTree);
-            const unsigned long cutpointId = maxId + 1;
-            bool cutOk = cutEdgeRandomWithCleanup(workingTree, p, c, cutpointId, &cutSubtree);
+            double cutStartTime = 0.0;
+            bool cutOk = cutEdgeRandomWithCleanup(workingTree, p, c, &cutSubtree, &cutStartTime);
             if (!cutOk) {
                 freeTree(workingTree);
                 std::cerr << "SMC cut-tree step skipped (invalid cut edge).\n";
@@ -394,6 +387,7 @@ int main(int argc, const char *argv[])
             SMCStepOutcome outcome;
             bool ok = simulateSMCOnTree_SMC(workingTree,
                                             cutSubtree,
+                                            cutStartTime,
                                             *params.paramData,
                                             mig_prob_cut,
                                             currentX,
@@ -411,6 +405,7 @@ int main(int argc, const char *argv[])
                 break;
             }
 
+            trimUnaryRootStem(workingTree);
             freeTree(activeTree);
             activeTree = workingTree;
 

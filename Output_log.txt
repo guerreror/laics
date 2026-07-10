@@ -1,4 +1,4 @@
-Random Seed: 2533032672
+Random Seed: 3939215551
 Input Seed: 0
 Number of runs: 1
 Assuming Kingman? 1
@@ -20,11 +20,12 @@ Markers in random locations? 1
 Warning: Asking for random SNPs, but number of SNPs read !=2. Will only take first and last SNP positions as the range for random SNP locations
 Window of SNP locations (in recUnits): 0 - 0
 Random sample of carriers? 0
-Sample in Pop 0: 10 10
+Sample in Pop 0: 1 1
+Sample size = 2 || Warning: Informative sites length function won't work.
 SMC verbose diagnostics? 0
 SMC target SNP diagnostics (raw units): 500 
 SMC GC rectangle height = 1e-05
 SMC DR triangle peak height = 0.01
 >>> Epoch breaks: 10000 
 >>> Epoch types:  0 
-Elapsed time: 0.831113s
+Elapsed time: 0.736758s

@@ -225,8 +225,8 @@ bool cutAtNodeWithUnaryCleanup(TreeNode*& root, TreeNode* cutNode, TreeNode** ou
 bool cutEdgeRandomWithCleanup(TreeNode*& root,
                               TreeNode* parent,
                               TreeNode* child,
-                              unsigned long newId,
-                              TreeNode** outCutSubtree) {
+                              TreeNode** outCutSubtree,
+                              double* outCutTime) {
     if (!root || !parent || !child || !outCutSubtree) return false;
     if (child->parent != parent) return false;
     const double t_parent = parent->time;
@@ -234,28 +234,23 @@ bool cutEdgeRandomWithCleanup(TreeNode*& root,
     if (t_parent <= t_child) return false;
 
     const double t_cut = randreal(t_child, t_parent);
-    TreeNode* cutpoint = new TreeNode();
-    cutpoint->id = newId;
-    cutpoint->time = t_cut;
-    cutpoint->context = child->context;
-    cutpoint->parent = parent;
-    cutpoint->children.push_back(child);
-
-    bool rewired = false;
-    for (auto& ch : parent->children) {
-        if (ch == child) {
-            ch = cutpoint;
-            rewired = true;
-            break;
-        }
+    if (outCutTime) {
+        *outCutTime = t_cut;
     }
-    if (!rewired) {
-        delete cutpoint;
-        return false;
-    }
-    child->parent = cutpoint;
 
-    return cutAtNodeWithUnaryCleanup(root, cutpoint, outCutSubtree);
+    return cutAtNodeWithUnaryCleanup(root, child, outCutSubtree);
+}
+
+void trimUnaryRootStem(TreeNode*& root) {
+    while (root && root->children.size() == 1) {
+        TreeNode* oldRoot = root;
+        TreeNode* newRoot = root->children.front();
+        oldRoot->children.clear();
+        oldRoot->parent = nullptr;
+        newRoot->parent = nullptr;
+        root = newRoot;
+        delete oldRoot;
+    }
 }
 
 static void gatherNodes(TreeNode* root, std::vector<TreeNode*>& out) {
