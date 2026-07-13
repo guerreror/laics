@@ -100,6 +100,55 @@ static double drawGeneFluxSegmentLength_SMC(double /*currentHopX*/) {
     return 0.01;
 }
 
+static double triangleHeightAtX_SMC(double x, const Segment& range, double peakHeight) {
+    const double L = range.L;
+    const double R = range.R;
+    if (R <= L || x <= L || x >= R) return 0.0;
+
+    const double mid = 0.5 * (L + R);
+    if (x <= mid) {
+        return peakHeight * ((x - L) / (mid - L));
+    }
+    return peakHeight * ((R - x) / (R - mid));
+}
+
+static std::string pickGeneFluxType_SMC(double x, const Parameters::ParameterData& params) {
+    const double gcHeight = std::max(0.0, params.gcRate);
+    const double drHeight = triangleHeightAtX_SMC(x, params.smcRange, std::max(0.0, params.drRate));
+    const double totalHeight = gcHeight + drHeight;
+    if (totalHeight <= 0.0) return "GC";
+
+    const double u = randreal(0.0, totalHeight);
+    return (u < gcHeight) ? "GC" : "DR";
+}
+
+static double drawDoubleRecombinationEnd_SMC(double startX, const Segment& range) {
+    const double mid = 0.5 * (range.L + range.R);
+    const double lower = std::max(startX, mid);
+    const double upper = range.R;
+    if (upper <= lower) return upper;
+    return randreal(lower, upper);
+}
+
+static GeneFluxEvent_SMC makeGeneFluxSegment_SMC(double startX,
+                                                 unsigned long nodeId,
+                                                 const std::string& type,
+                                                 const Parameters::ParameterData& params) {
+    GeneFluxEvent_SMC evt;
+    evt.startX = std::max(params.smcRange.L, std::min(params.smcRange.R, startX));
+    evt.nodeId = nodeId;
+    evt.type = type;
+
+    if (type == "DR") {
+        evt.endX = drawDoubleRecombinationEnd_SMC(evt.startX, params.smcRange);
+    } else {
+        const double J = drawGeneFluxSegmentLength_SMC(evt.startX);
+        evt.endX = evt.startX + J;
+    }
+    evt.endX = std::max(evt.startX, std::min(params.smcRange.R, evt.endX));
+    return evt;
+}
+
 static unsigned int pickMigrationDest_SMC(unsigned int fromPop,
                                           const std::vector<std::vector<double>>& mig_prob) {
     const auto& row = mig_prob.at(fromPop);
@@ -119,6 +168,7 @@ static bool canCoalesceByContext_SMC(const TreeNode* a, const TreeNode* b) {
 
 static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
                                           TreeNode*& cutRoot,
+                                          double cutLineageTime,
                                           const Parameters::ParameterData& params,
                                           const std::vector<std::vector<double>>& mig_prob,
                                           double currentHopX,
@@ -126,24 +176,27 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
                                           std::ofstream& evlog,
                                           int hopIndex,
                                           double root_time) {
-    if (!mainRoot || !cutRoot) return false;
+    if (!mainRoot || !cutRoot) {
+        std::cerr << "SMC fallback failed: missing main or cut lineage.\n";
+        return false;
+    }
 
     unsigned long nextId = std::max(getMaxId(mainRoot), getMaxId(cutRoot)) + 1;
-    if (cutRoot->time < root_time) {
-        TreeNode* nr = addUnaryAbove(cutRoot, nextId++, root_time, cutRoot->context);
+    double currentTime = std::max(root_time, cutLineageTime);
+    if (mainRoot->time < currentTime) {
+        TreeNode* nr = addUnaryAbove(mainRoot, nextId++, currentTime, mainRoot->context);
+        if (nr && nr->parent == nullptr) mainRoot = nr;
+    }
+    if (cutRoot->time < currentTime) {
+        TreeNode* nr = addUnaryAbove(cutRoot, nextId++, currentTime, cutRoot->context);
         if (nr && nr->parent == nullptr) cutRoot = nr;
-    } else {
-        cutRoot->time = root_time;
     }
 
     std::vector<TreeNode*> lineages;
     lineages.push_back(mainRoot);
     lineages.push_back(cutRoot);
 
-    const int maxFallbackSteps = 200000;
-    for (int step = 0; step < maxFallbackSteps; ++step) {
-        if (lineages.size() <= 1) break;
-
+    while (lineages.size() > 1) {
         std::vector<double> totalM_i(lineages.size(), 0.0);
         std::vector<double> totalG_i(lineages.size(), 0.0);
         double totalM = 0.0;
@@ -156,13 +209,14 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
         }
         const double totalC = computeTotalC_SMC(params);
         const double Rate = totalC + totalM + totalG;
-        if (Rate <= 0.0) return false;
+        if (Rate <= 0.0) {
+            std::cerr << "SMC fallback failed: total event rate is zero.\n";
+            return false;
+        }
 
         const double dt = randexp(Rate);
-        const double event_time = lineages[0]->time + dt;
-        for (auto* ln : lineages) {
-            if (ln) ln->time = event_time;
-        }
+        const double event_time = currentTime + dt;
+        currentTime = event_time;
 
         const double roll = randreal(0, Rate);
         if (roll < totalC) {
@@ -216,23 +270,27 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
                 newCtx.inversion = (newCtx.inversion == 0 ? 1 : 0);
                 TreeNode* nr = addUnaryAbove(lineages[i], nextId++, event_time, newCtx);
                 if (nr && nr->parent == nullptr) lineages[i] = nr;
+                const std::string geneFluxType = pickGeneFluxType_SMC(currentHopX, params);
                 if (outcome) {
-                    GeneFluxEvent_SMC evt;
-                    evt.startX = std::max(params.smcRange.L, std::min(params.smcRange.R, currentHopX));
-                    evt.endX = std::max(evt.startX, std::min(params.smcRange.R, evt.startX + drawGeneFluxSegmentLength_SMC(currentHopX)));
-                    evt.nodeId = nr ? nr->id : 0;
+                    GeneFluxEvent_SMC evt = makeGeneFluxSegment_SMC(currentHopX,
+                                                                    nr ? nr->id : 0,
+                                                                    geneFluxType,
+                                                                    params);
                     outcome->geneFluxEvents.push_back(evt);
                 }
-                recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX, "gene_flux_fallback", event_time);
+                recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX,
+                                   "gene_flux_fallback_" + geneFluxType, event_time);
                 handled = true;
                 break;
             }
             rem -= totalG_i[i];
         }
-        if (!handled) return false;
+        if (!handled) {
+            std::cerr << "SMC fallback failed: sampled event was outside all rate channels.\n";
+            return false;
+        }
     }
 
-    if (lineages.size() != 1) return false;
     mainRoot = lineages[0];
     if (outcome) {
         outcome->coalesced = true;
@@ -244,13 +302,17 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
 
 bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
                            TreeNode*& cutRoot,
+                           double cutStartTime,
                            const Parameters::ParameterData& params,
                            const std::vector<std::vector<double>>& mig_prob,
                            double currentHopX,
                            int hopIndex,
                            SMCStepOutcome* outcome,
                            const std::string& eventLogPath) {
-    if (!mainRoot || !cutRoot) return false;
+    if (!mainRoot || !cutRoot) {
+        std::cerr << "SMC reattachment failed: missing main or cut lineage.\n";
+        return false;
+    }
     if (outcome) {
         *outcome = SMCStepOutcome{};
     }
@@ -264,24 +326,28 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
         evlog << "hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
     }
     double nextGeneFluxStartX = currentHopX;
+    double lineageTime = std::max(cutStartTime, cutRoot->time);
 
-    const int maxSteps = 1000;
-    for (int step = 0; step < maxSteps; ++step) {
-        SMCEpochs_SMC epochs = buildEpochBreaks_SMC(mainRoot, cutRoot->time);
+    while (true) {
+        SMCEpochs_SMC epochs = buildEpochBreaks_SMC(mainRoot, lineageTime);
 
         double totalM = computeTotalM_SMC(cutRoot, params, mig_prob) * SMC_DEBUG_MIGRATION_BOOST;
         double totalC = computeTotalC_SMC(params);
         double totalG = computeTotalG_SMC(cutRoot, params, currentHopX);
         double Rate = totalM + totalC + totalG;
-        if (Rate == 0.0) return false;
+        if (Rate <= 0.0) {
+            std::cerr << "SMC reattachment failed: total event rate is zero.\n";
+            return false;
+        }
 
         double waiting_t = randexp(Rate);
-        double event_time = cutRoot->time + waiting_t;
+        double event_time = lineageTime + waiting_t;
 
         if (event_time >= root_time) {
-            if (resolveAboveRootByMiniSMC_SMC(mainRoot, cutRoot, params, mig_prob, currentHopX, outcome, evlog, hopIndex, root_time)) {
+            if (resolveAboveRootByMiniSMC_SMC(mainRoot, cutRoot, lineageTime, params, mig_prob, currentHopX, outcome, evlog, hopIndex, root_time)) {
                 return true;
             }
+            std::cerr << "SMC reattachment failed: above-root simulation did not coalesce.\n";
             if (outcome) {
                 outcome->coalesced = false;
                 outcome->hitRootLimit = true;
@@ -291,9 +357,9 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
         }
 
         if (!epochs.breaks.empty()) {
-            auto it = std::upper_bound(epochs.breaks.begin(), epochs.breaks.end(), cutRoot->time);
+            auto it = std::upper_bound(epochs.breaks.begin(), epochs.breaks.end(), lineageTime);
             if (it != epochs.breaks.end() && event_time >= *it) {
-                cutRoot->time = *it;
+                lineageTime = *it;
                 continue;
             }
         }
@@ -312,6 +378,7 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
             if (newRoot->parent == nullptr) {
                 cutRoot = newRoot;
             }
+            lineageTime = event_time;
             recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX, "migration", event_time);
         } else if (is_coalescence) {
             unsigned long nextId = std::max(getMaxId(mainRoot), getMaxId(cutRoot)) + 1;
@@ -326,17 +393,18 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
             }
 
             if (!epochs.breaks.empty()) {
-                auto it = std::upper_bound(epochs.breaks.begin(), epochs.breaks.end(), cutRoot->time);
+                auto it = std::upper_bound(epochs.breaks.begin(), epochs.breaks.end(), lineageTime);
                 if (it != epochs.breaks.end()) {
-                    cutRoot->time = *it;
+                    lineageTime = *it;
                     continue;
                 }
             }
             if (outcome) {
                 outcome->coalesced = false;
                 outcome->hitRootLimit = false;
-                outcome->stopTime = cutRoot->time;
+                outcome->stopTime = lineageTime;
             }
+            std::cerr << "SMC reattachment failed: no compatible main-tree edge and no later epoch.\n";
             return false;
         } else if (is_gene_flux) {
             unsigned long nextId = std::max(getMaxId(mainRoot), getMaxId(cutRoot)) + 1;
@@ -346,26 +414,22 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
             if (newRoot->parent == nullptr) {
                 cutRoot = newRoot;
             }
+            lineageTime = event_time;
 
-            const double J = drawGeneFluxSegmentLength_SMC(currentHopX);
+            const std::string geneFluxType = pickGeneFluxType_SMC(nextGeneFluxStartX, params);
+            GeneFluxEvent_SMC evt = makeGeneFluxSegment_SMC(nextGeneFluxStartX,
+                                                            nextId,
+                                                            geneFluxType,
+                                                            params);
             if (outcome) {
-                GeneFluxEvent_SMC evt;
-                evt.startX = std::max(params.smcRange.L, std::min(params.smcRange.R, nextGeneFluxStartX));
-                evt.endX = std::max(evt.startX, std::min(params.smcRange.R, evt.startX + J));
-                evt.nodeId = nextId;
                 outcome->geneFluxEvents.push_back(evt);
             }
-            nextGeneFluxStartX = std::min(params.smcRange.R, nextGeneFluxStartX + J);
-            recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX, "gene_flux", event_time);
+            nextGeneFluxStartX = evt.endX;
+            recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX,
+                               "gene_flux_" + geneFluxType, event_time);
         }
     }
 
-    if (outcome) {
-        outcome->coalesced = false;
-        outcome->hitRootLimit = false;
-        outcome->stopTime = cutRoot->time;
-    }
-    return false;
 }
 
 unsigned short World::simulateGeneration_SMC(vector<vector<double>>& mig_prob) {

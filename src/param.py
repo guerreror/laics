@@ -42,6 +42,8 @@ parameters = {
     "smc":          "0",
     "verbose":      "1",
     "target_snp":   "",
+    "gc":           "1.0",
+    "dr":           "1.0",
     "outputRoot":   DEFAULT_OUTPUT_ROOT,
 }
 
@@ -430,10 +432,7 @@ def _collect_per_pop_strings(parameters: dict, pops: int, random_flag: str):
         raise ValueError(f"randomSample==0: pop0 string 'tempRead' must have exactly 2 integers, got {len(vals0)}.")
     per_pop.append(parameters["tempRead"])
 
-    # pop0 is represented by tempRead above. Additional populations use
-    # nCarriers for pop1, nCarriers1 for pop2, nCarriers2 for pop3, etc.
-    # For one-pop models, range(1, pops) is empty, so tempRead is the only
-    # sample string passed to C++.
+    # remaining pops from nCarriers, nCarriers1, nCarriers2, ...
     carriers_keys = []
     if pops > 1:
         carriers_keys = ["nCarriers"] + [f"nCarriers{i}" for i in range(1, pops-1)]
@@ -467,7 +466,7 @@ per_pop_strings = _collect_per_pop_strings(parameters, pops, random_flag)
 # Compose final argv list
 args_list = [parameters[k] for k in base_keys_order] + per_pop_strings
 if smc_flag == "1":
-    args_list += [parameters["verbose"], parameters["target_snp"]]
+    args_list += [parameters["verbose"], parameters["target_snp"], parameters["gc"], parameters["dr"]]
 
 output_root = os.environ.get("LAICS_OUTPUT_ROOT", parameters.get("outputRoot", DEFAULT_OUTPUT_ROOT))
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -497,6 +496,8 @@ else:
 if smc_flag == "1":
     print(f"verbose: {parameters['verbose']}")
     print(f"target_snp: {parameters['target_snp']}")
+    print(f"gc: {parameters['gc']}")
+    print(f"dr: {parameters['dr']}")
 
 try:
     proc = subprocess.Popen(

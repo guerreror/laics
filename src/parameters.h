@@ -69,6 +69,8 @@
      std::vector<double> neut_site;
      bool smcVerbose;
      std::vector<double> targetSNPs;
+     double gcRate;
+     double drRate;
      double timestamp;
      unsigned long totalPopSize;
  };

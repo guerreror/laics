@@ -2,7 +2,15 @@ description: one-population SNM
 time_units: generations
 
 demes:
+  # Ancestral deme
+  - name: root
+    epochs:
+      - start_size: 10000
+        end_time: 10000    
+
   - name: pop0
+    start_time: 10000
+    ancestors: [root]
     epochs:
       - start_size: 10000
         end_time: 0

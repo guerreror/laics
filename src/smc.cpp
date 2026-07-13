@@ -15,6 +15,7 @@
 #include <random>
 #include <algorithm>
 #include <cstdlib>
+#include <iomanip>
 
 using namespace std;
 
@@ -157,8 +158,18 @@ static void collectEdgeWeightsFromTree(
     if (!node) return;
     for (auto* child : node->children) {
         if (!child) continue;
+
+        // Cutting an edge on a unary root stem removes the entire genealogy,
+        // leaving no retained tree for the lineage to reattach to.
+        TreeNode* branchingAncestor = node;
+        while (branchingAncestor && branchingAncestor->children.size() == 1) {
+            branchingAncestor = branchingAncestor->parent;
+        }
+        const bool leavesRetainedTree =
+            branchingAncestor && branchingAncestor->children.size() > 1;
+
         const unsigned int pop = child->context.pop;
-        if (pop < pop_sizes.size() && pop < inv_freqs.size()) {
+        if (leavesRetainedTree && pop < pop_sizes.size() && pop < inv_freqs.size()) {
             const double popN = pop_sizes[pop];
             const double pI = inv_freqs[pop];
             const double branchL = node->time - child->time;
@@ -211,6 +222,19 @@ static void writeTreeArtifacts(TreeNode* tree, const std::string& base)
         std::cerr << "Warning: failed to render " << collapsedDot
                   << " to tskit SVG.\n";
     }
+}
+
+static std::string formatCoordForFilename(double x)
+{
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(6) << x;
+    std::string out = ss.str();
+    while (!out.empty() && out.back() == '0') out.pop_back();
+    if (!out.empty() && out.back() == '.') out.pop_back();
+    std::replace(out.begin(), out.end(), '.', 'p');
+    std::replace(out.begin(), out.end(), '-', 'm');
+    if (out.empty()) out = "0";
+    return out;
 }
 
 struct TreeShapeStats {
@@ -461,18 +485,14 @@ int main(int argc, const char *argv[])
         vector<EdgeWeight> last_standard_edges;
         vector<EdgeWeight> last_inverted_edges;
         vector<bool> targetEmitted(params.paramData->targetSNPs.size(), false);
-        bool hopTraceHeaderWritten = false;
-        bool hopEventsHeaderWritten = false;
-        if (writeAllDiagnostics) {
+        {
             std::ofstream hoplog(pathJoin(output_dir, "smc_hop_trace.csv"));
             if (hoplog.is_open()) {
                 hoplog << "hop,current_x,raw_delta_x,used_delta_x,next_x,rho,Li_sum,Ls_sum\n";
-                hopTraceHeaderWritten = true;
             }
             std::ofstream hop_events(pathJoin(output_dir, "smc_hop_events.csv"));
             if (hop_events.is_open()) {
                 hop_events << "hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
-                hopEventsHeaderWritten = true;
             }
         }
 
@@ -496,6 +516,8 @@ int main(int argc, const char *argv[])
 
         const int maxHopsSkeleton = 1000;
         for (int hop = 0; hop < maxHopsSkeleton; ++hop) {
+        int hop = 0;
+        while (currentX < params.paramData->smcRange.R) {
             vector<EdgeWeight> standard_edges;
             vector<EdgeWeight> inverted_edges;
             collectEdgeWeightsFromTree(activeTree,
@@ -541,15 +563,8 @@ int main(int argc, const char *argv[])
                 break;
             }
             TreeNode* cutSubtree = nullptr;
-            unsigned long maxId = 0;
-            std::function<void(TreeNode*)> gather = [&](TreeNode* n){
-                if (!n) return;
-                if (n->id > maxId) maxId = n->id;
-                for (auto* ch : n->children) gather(ch);
-            };
-            gather(workingTree);
-            const unsigned long cutpointId = maxId + 1;
-            bool cutOk = cutEdgeRandomWithCleanup(workingTree, p, c, cutpointId, &cutSubtree);
+            double cutStartTime = 0.0;
+            bool cutOk = cutEdgeRandomWithCleanup(workingTree, p, c, &cutSubtree, &cutStartTime);
             if (!cutOk) {
                 freeTree(workingTree);
                 std::cerr << "SMC cut-tree step skipped (invalid cut edge).\n";
@@ -559,6 +574,7 @@ int main(int argc, const char *argv[])
             SMCStepOutcome outcome;
             bool ok = simulateSMCOnTree_SMC(workingTree,
                                             cutSubtree,
+                                            cutStartTime,
                                             *params.paramData,
                                             mig_prob_cut,
                                             currentX,
@@ -576,6 +592,7 @@ int main(int argc, const char *argv[])
                 break;
             }
 
+            trimUnaryRootStem(workingTree);
             freeTree(activeTree);
             activeTree = workingTree;
 
@@ -608,6 +625,7 @@ int main(int argc, const char *argv[])
             }
 
             bool writeThisHop = writeAllDiagnostics;
+            vector<double> targetsForThisHop;
             if (targetMode) {
                 const double eps = 1e-15;
                 for (size_t i = 0; i < params.paramData->targetSNPs.size(); ++i) {
@@ -619,16 +637,32 @@ int main(int argc, const char *argv[])
                     }
                     if (targetX <= nextX + eps) {
                         writeThisHop = true;
+                        targetsForThisHop.push_back(targetX);
                         targetEmitted[i] = true;
                     }
                 }
             }
 
             if (writeThisHop) {
-                std::ostringstream hopBase;
-                hopBase << "genetree_hop" << (hop + 1);
-                const string hopBasePath = pathJoin(tree_dir, hopBase.str());
-                writeTreeArtifacts(activeTree, hopBasePath);
+                vector<std::string> artifactBases;
+                if (targetMode) {
+                    for (double targetX : targetsForThisHop) {
+                        std::ostringstream targetBase;
+                        targetBase << "genetree_target"
+                                   << formatCoordForFilename(targetX)
+                                   << "_hop" << (hop + 1)
+                                   << "_x" << formatCoordForFilename(currentX)
+                                   << "_to_" << formatCoordForFilename(nextX);
+                        artifactBases.push_back(targetBase.str());
+                    }
+                } else {
+                    std::ostringstream hopBase;
+                    hopBase << "genetree_hop" << (hop + 1);
+                    artifactBases.push_back(hopBase.str());
+                }
+
+                for (const auto& hopBase : artifactBases) {
+                    writeTreeArtifacts(activeTree, hopBase);
 
                 if (targetMode) {
                     writeEdgeWeightsCSV(standard_edges, hopBasePath + "_edge_weights_standard.csv");
@@ -650,8 +684,7 @@ int main(int argc, const char *argv[])
                            << Ls_sum << "\n";
                 }
             }
-            if (writeThisHop) {
-                ensureHopEventsHeader();
+            {
                 std::ofstream hop_events(pathJoin(output_dir, "smc_hop_events.csv"), std::ios::app);
                 if (hop_events.is_open()) {
                     for (const auto& row : outcome.eventRows) {
@@ -667,23 +700,26 @@ int main(int argc, const char *argv[])
                 }
             }
             currentX = nextX;
+            ++hop;
         }
 
         if (writeAllDiagnostics) {
             std::ofstream gf_active(pathJoin(output_dir, "smc_gene_flux_active.csv"));
             if (gf_active.is_open()) {
-                gf_active << "x_start,x_end,node_id\n";
+                gf_active << "x_start,x_end,node_id,type\n";
                 for (const auto& evt : geneFluxActive) {
-                    gf_active << evt.startX << "," << evt.endX << "," << evt.nodeId << "\n";
+                    gf_active << evt.startX << "," << evt.endX << "," << evt.nodeId
+                              << "," << evt.type << "\n";
                 }
             }
         }
         if (writeAllDiagnostics) {
             std::ofstream gf_log(pathJoin(output_dir, "smc_gene_flux_log.csv"));
             if (gf_log.is_open()) {
-                gf_log << "x_start,x_end,node_id\n";
+                gf_log << "x_start,x_end,node_id,type\n";
                 for (const auto& evt : geneFluxLog) {
-                    gf_log << evt.startX << "," << evt.endX << "," << evt.nodeId << "\n";
+                    gf_log << evt.startX << "," << evt.endX << "," << evt.nodeId
+                           << "," << evt.type << "\n";
                 }
             }
         }

@@ -22,8 +22,9 @@ bool cutAtNodeWithUnaryCleanup(TreeNode*& root, TreeNode* cutNode, TreeNode** ou
 bool cutEdgeRandomWithCleanup(TreeNode*& root,
                               TreeNode* parent,
                               TreeNode* child,
-                              unsigned long newId,
-                              TreeNode** outCutSubtree);
+                              TreeNode** outCutSubtree,
+                              double* outCutTime);
+void trimUnaryRootStem(TreeNode*& root);
 
 unsigned long getMaxId(TreeNode* root);
 TreeNode* addUnaryAbove(TreeNode* node, unsigned long newId, double newTime, const Context& newCtx);

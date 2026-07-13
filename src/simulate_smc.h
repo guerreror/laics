@@ -10,6 +10,7 @@ struct GeneFluxEvent_SMC {
     double startX = -1.0;
     double endX = -1.0;
     unsigned long nodeId = 0;
+    std::string type;
 };
 
 struct SMCEpochs_SMC {
@@ -30,6 +31,7 @@ SMCEpochs_SMC buildEpochBreaks_SMC(TreeNode* mainTree, double cut_time);
 // then reattach to the main tree.
 bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
                            TreeNode*& cutRoot,
+                           double cutStartTime,
                            const Parameters::ParameterData& params,
                            const std::vector<std::vector<double>>& mig_prob,
                            double currentHopX,
