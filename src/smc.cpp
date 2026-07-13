@@ -485,14 +485,18 @@ int main(int argc, const char *argv[])
         vector<EdgeWeight> last_standard_edges;
         vector<EdgeWeight> last_inverted_edges;
         vector<bool> targetEmitted(params.paramData->targetSNPs.size(), false);
-        {
+        bool hopTraceHeaderWritten = false;
+        bool hopEventsHeaderWritten = false;
+        if (writeAllDiagnostics) {
             std::ofstream hoplog(pathJoin(output_dir, "smc_hop_trace.csv"));
             if (hoplog.is_open()) {
                 hoplog << "hop,current_x,raw_delta_x,used_delta_x,next_x,rho,Li_sum,Ls_sum\n";
+                hopTraceHeaderWritten = true;
             }
             std::ofstream hop_events(pathJoin(output_dir, "smc_hop_events.csv"));
             if (hop_events.is_open()) {
                 hop_events << "hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
+                hopEventsHeaderWritten = true;
             }
         }
 
@@ -514,8 +518,6 @@ int main(int argc, const char *argv[])
             }
         };
 
-        const int maxHopsSkeleton = 1000;
-        for (int hop = 0; hop < maxHopsSkeleton; ++hop) {
         int hop = 0;
         while (currentX < params.paramData->smcRange.R) {
             vector<EdgeWeight> standard_edges;
@@ -662,11 +664,13 @@ int main(int argc, const char *argv[])
                 }
 
                 for (const auto& hopBase : artifactBases) {
-                    writeTreeArtifacts(activeTree, hopBase);
+                    const string hopBasePath = pathJoin(tree_dir, hopBase);
+                    writeTreeArtifacts(activeTree, hopBasePath);
 
-                if (targetMode) {
-                    writeEdgeWeightsCSV(standard_edges, hopBasePath + "_edge_weights_standard.csv");
-                    writeEdgeWeightsCSV(inverted_edges, hopBasePath + "_edge_weights_inverted.csv");
+                    if (targetMode) {
+                        writeEdgeWeightsCSV(standard_edges, hopBasePath + "_edge_weights_standard.csv");
+                        writeEdgeWeightsCSV(inverted_edges, hopBasePath + "_edge_weights_inverted.csv");
+                    }
                 }
             }
 
@@ -684,7 +688,8 @@ int main(int argc, const char *argv[])
                            << Ls_sum << "\n";
                 }
             }
-            {
+            if (writeThisHop) {
+                ensureHopEventsHeader();
                 std::ofstream hop_events(pathJoin(output_dir, "smc_hop_events.csv"), std::ios::app);
                 if (hop_events.is_open()) {
                     for (const auto& row : outcome.eventRows) {
