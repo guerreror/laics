@@ -1,4 +1,4 @@
-description: one-population constant-size control
+description: one-population SNM
 time_units: generations
 
 demes:

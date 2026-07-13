@@ -213,6 +213,141 @@ static void writeTreeArtifacts(TreeNode* tree, const std::string& base)
     }
 }
 
+struct TreeShapeStats {
+    unsigned long node_count = 0;
+    unsigned long edge_count = 0;
+    unsigned long leaf_count = 0;
+    unsigned long unary_node_count = 0;
+    unsigned long branching_node_count = 0;
+    unsigned long max_depth = 0;
+    double root_time = 0.0;
+    double max_time = 0.0;
+    double total_branch_length = 0.0;
+    double unary_parent_branch_length = 0.0;
+    double terminal_leaf_branch_length = 0.0;
+    double internal_branching_branch_length = 0.0;
+    double terminal_from_unary_parent_branch_length = 0.0;
+    double terminal_from_branching_parent_branch_length = 0.0;
+    double internal_unary_chain_branch_length = 0.0;
+    double internal_branching_exclusive_branch_length = 0.0;
+    double standard_branch_length = 0.0;
+    double inverted_branch_length = 0.0;
+};
+
+static void accumulateTreeShapeStats(TreeNode* node,
+                                     unsigned long depth,
+                                     TreeShapeStats& stats)
+{
+    if (!node) return;
+
+    stats.node_count++;
+    stats.max_depth = std::max(stats.max_depth, depth);
+    stats.max_time = std::max(stats.max_time, node->time);
+
+    if (node->children.empty()) {
+        stats.leaf_count++;
+    } else if (node->children.size() == 1) {
+        stats.unary_node_count++;
+    } else {
+        stats.branching_node_count++;
+    }
+
+    for (auto* child : node->children) {
+        if (!child) continue;
+        const double branchL = node->time - child->time;
+        if (branchL > 0.0) {
+            stats.edge_count++;
+            stats.total_branch_length += branchL;
+            if (child->context.inversion == 1) {
+                stats.inverted_branch_length += branchL;
+            } else {
+                stats.standard_branch_length += branchL;
+            }
+
+            // Diagnostic only. The first few summaries intentionally overlap
+            // historical questions we were asking; the exclusive categories
+            // below classify each branch exactly once for clean composition plots.
+            if (node->children.size() == 1) {
+                stats.unary_parent_branch_length += branchL;
+            }
+            if (child->children.empty()) {
+                stats.terminal_leaf_branch_length += branchL;
+            } else if (child->children.size() > 1) {
+                stats.internal_branching_branch_length += branchL;
+            }
+
+            if (child->children.empty() && node->children.size() == 1) {
+                stats.terminal_from_unary_parent_branch_length += branchL;
+            } else if (child->children.empty()) {
+                stats.terminal_from_branching_parent_branch_length += branchL;
+            } else if (node->children.size() == 1) {
+                stats.internal_unary_chain_branch_length += branchL;
+            } else {
+                stats.internal_branching_exclusive_branch_length += branchL;
+            }
+        }
+        accumulateTreeShapeStats(child, depth + 1, stats);
+    }
+}
+
+static TreeShapeStats summarizeTreeShape(TreeNode* root)
+{
+    TreeShapeStats stats;
+    if (root) {
+        stats.root_time = root->time;
+        accumulateTreeShapeStats(root, 0, stats);
+    }
+    return stats;
+}
+
+static void writeTreeShapeHeader(const string& path)
+{
+    std::ofstream out(path.c_str());
+    if (!out.is_open()) return;
+    out << "run,hop,current_x,rho,root_time,max_time,node_count,edge_count,"
+        << "leaf_count,unary_node_count,branching_node_count,max_depth,"
+        << "total_branch_length,unary_parent_branch_length,"
+        << "terminal_leaf_branch_length,internal_branching_branch_length,"
+        << "terminal_from_unary_parent_branch_length,"
+        << "terminal_from_branching_parent_branch_length,"
+        << "internal_unary_chain_branch_length,"
+        << "internal_branching_exclusive_branch_length,"
+        << "standard_branch_length,inverted_branch_length\n";
+}
+
+static void appendTreeShapeRow(const string& path,
+                               int run,
+                               int hop,
+                               double currentX,
+                               double rho,
+                               const TreeShapeStats& stats)
+{
+    std::ofstream out(path.c_str(), std::ios::app);
+    if (!out.is_open()) return;
+    out << run << ","
+        << hop << ","
+        << currentX << ","
+        << rho << ","
+        << stats.root_time << ","
+        << stats.max_time << ","
+        << stats.node_count << ","
+        << stats.edge_count << ","
+        << stats.leaf_count << ","
+        << stats.unary_node_count << ","
+        << stats.branching_node_count << ","
+        << stats.max_depth << ","
+        << stats.total_branch_length << ","
+        << stats.unary_parent_branch_length << ","
+        << stats.terminal_leaf_branch_length << ","
+        << stats.internal_branching_branch_length << ","
+        << stats.terminal_from_unary_parent_branch_length << ","
+        << stats.terminal_from_branching_parent_branch_length << ","
+        << stats.internal_unary_chain_branch_length << ","
+        << stats.internal_branching_exclusive_branch_length << ","
+        << stats.standard_branch_length << ","
+        << stats.inverted_branch_length << "\n";
+}
+
 int main(int argc, const char *argv[])
 {
     std::cerr << "Random Seed: " << seed << '\n';
@@ -246,6 +381,8 @@ int main(int argc, const char *argv[])
     unsigned int nSites = params.paramData->n_SNPs;
     const bool targetMode = !params.paramData->targetSNPs.empty();
     const bool writeAllDiagnostics = !targetMode && params.paramData->smcVerbose;
+    const string tree_shape_path = pathJoin(output_dir, "smc_tree_shape.csv");
+    bool treeShapeHeaderWritten = false;
 
     const std::string mig_json = "src/migration_matrices.json";
     auto schedule = readMigrationSchedule(mig_json);
@@ -307,7 +444,7 @@ int main(int argc, const char *argv[])
             allNodes.back()->writeDOT(pathJoin(tree_dir, "argtree.dot"));
         }
 
-        const double r = 1.0e5;
+        const double r = 1.0e-8;
         TreeNode* activeTree = buildX0TreeFromARGPreserveUnary(argStartX, allNodes.back());
         if (!activeTree) {
             std::cerr << "Could not build unary-preserving x0 tree from ARG.\n";
@@ -376,6 +513,16 @@ int main(int argc, const char *argv[])
             if (rho <= 0.0) {
                 break;
             }
+            if (!treeShapeHeaderWritten) {
+                writeTreeShapeHeader(tree_shape_path);
+                treeShapeHeaderWritten = true;
+            }
+            appendTreeShapeRow(tree_shape_path,
+                               timer,
+                               hop,
+                               currentX,
+                               rho,
+                               summarizeTreeShape(activeTree));
 
             TreeNode* workingTree = cloneTree(activeTree);
             unsigned long cutParentId = 0;

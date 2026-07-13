@@ -34,7 +34,6 @@ g++ -std=c++14 -O3 -g -fno-omit-frame-pointer \
   -o labp_v21
 
 mv labp_v21 ../executables/
-
 cd ../
 
 python src/mig_matrix_demes.py
