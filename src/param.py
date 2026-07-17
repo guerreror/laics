@@ -6,11 +6,13 @@ import subprocess
 import argparse
 import re
 import random
+import json
 from collections import defaultdict, deque
 
 # ---------- File paths ----------
 PARAMETERS_YAML      = "src/parameters.yaml"
 DEMES_YAML      = "src/demes.yaml"
+MIGRATION_JSON  = "src/migration_matrices.json"
 EXECUTABLE_ARG  = "./executables/labp_v21"
 EXECUTABLE_SMC  = "./executables/labp_smc"
 
@@ -145,6 +147,26 @@ def render_tree_ascii(graph, only_these_leaves=None):
             dfs(v, next_prefix, depth + 1, last)
     dfs(root)
     return "\n".join(lines)
+
+def write_migration_matrices_from_demes(graph, out_json=MIGRATION_JSON):
+    matrices, times = graph.migration_matrices()
+
+    def adjust_diagonal(matrix):
+        adjusted = []
+        for i, row in enumerate(matrix):
+            out_row = [float(x) for x in row]
+            off_diag_sum = sum(out_row[j] for j in range(len(out_row)) if j != i)
+            out_row[i] = 1.0 - off_diag_sum
+            adjusted.append([round(x, 5) for x in out_row])
+        return adjusted
+
+    pairs = sorted(zip(times, matrices), key=lambda x: x[0])
+    payload = {str(int(t)): adjust_diagonal(m) for t, m in pairs}
+
+    with open(out_json, "w") as f:
+        json.dump(payload, f, indent=4)
+
+    print(f"Wrote {out_json} with matrices at times: {list(payload.keys())}")
 
 # ---------- Speciation (sizes + events) ----------
 def build_speciation_from_demes(graph, ancestor_freqs=None, default_F=0.2):
@@ -338,6 +360,12 @@ try:
     graph = demes.load(DEMES_YAML)
 except Exception as e:
     print(f"Error loading {DEMES_YAML}: {e}", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    write_migration_matrices_from_demes(graph)
+except Exception as e:
+    print(f"Error writing {MIGRATION_JSON}: {e}", file=sys.stderr)
     sys.exit(1)
 
 try:

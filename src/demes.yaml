@@ -1,11 +1,34 @@
-description: single pop
+# description: single pop
+# time_units: generations
+
+# demes:
+#   - name: pop0
+#     epochs:
+#       - start_size: 10000
+#         end_time: 0
+
+# -----------------------------------------------------------------
+
+description: one-population SNM
 time_units: generations
 
 demes:
+  # Ancestral deme
+  - name: root
+    epochs:
+      - start_size: 10000
+        end_time: 10000    
+
   - name: pop0
+    start_time: 10000
+    ancestors: [root]
     epochs:
       - start_size: 10000
         end_time: 0
+
+
+# -----------------------------------------------------------------
+
 # description: two pops of size 10000 split from a single ancestor at 10000 generations
 # time_units: generations
 
@@ -32,4 +55,4 @@ demes:
 
 # migrations:
 #   - demes: [pop0, pop1]
-#     rate: 0.00005
+#     rate: 0.0
