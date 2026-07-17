@@ -174,7 +174,7 @@ static void collectEdgeWeightsFromTree(
             const double pI = inv_freqs[pop];
             const double branchL = node->time - child->time;
             if (branchL > 0.0) {
-                const double base = 2.0 * r * popN * branchL;
+                const double base = r * branchL;
                 if (child->context.inversion == 1) {
                     inverted_edges.push_back({node->id, child->id, base * pI});
                 } else {

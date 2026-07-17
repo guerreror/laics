@@ -45,6 +45,21 @@ def group_by_run(rows):
     return dict(sorted(grouped.items()))
 
 
+def quantile(values, probability):
+    values = sorted(values)
+    if not values:
+        return float("nan")
+    if len(values) == 1:
+        return values[0]
+    index = probability * (len(values) - 1)
+    lower = int(math.floor(index))
+    upper = int(math.ceil(index))
+    if lower == upper:
+        return values[lower]
+    fraction = index - lower
+    return values[lower] * (1.0 - fraction) + values[upper] * fraction
+
+
 def mean_by_hop(rows, fields):
     by_hop = defaultdict(list)
     for row in rows:
@@ -52,12 +67,53 @@ def mean_by_hop(rows, fields):
 
     means = []
     for hop in sorted(by_hop):
-        out = {"hop": hop}
+        out = {"hop": hop, "n": len(by_hop[hop])}
         for field in fields:
             vals = [row[field] for row in by_hop[hop] if field in row and math.isfinite(row[field])]
             out[field] = sum(vals) / len(vals) if vals else float("nan")
+            out[f"{field}_q10"] = quantile(vals, 0.10)
+            out[f"{field}_q90"] = quantile(vals, 0.90)
         means.append(out)
     return means
+
+
+def position_weighted_bins(grouped, field, region_length, n_bins=100):
+    if not region_length or region_length <= 0.0:
+        return [], [], [], []
+
+    bin_width = region_length / n_bins
+    per_run = []
+    for rows in grouped.values():
+        weighted_sum = [0.0] * n_bins
+        covered = [0.0] * n_bins
+        for index, row in enumerate(rows):
+            start = max(0.0, row["current_x"])
+            end = rows[index + 1]["current_x"] if index + 1 < len(rows) else region_length
+            end = min(region_length, end)
+            if end <= start:
+                continue
+            first_bin = max(0, min(n_bins - 1, int(start / bin_width)))
+            last_bin = max(0, min(n_bins - 1, int(math.nextafter(end, start) / bin_width)))
+            for bin_index in range(first_bin, last_bin + 1):
+                bin_start = bin_index * bin_width
+                bin_end = bin_start + bin_width
+                overlap = max(0.0, min(end, bin_end) - max(start, bin_start))
+                if overlap > 0.0:
+                    weighted_sum[bin_index] += row[field] * overlap
+                    covered[bin_index] += overlap
+        per_run.append([
+            weighted_sum[i] / covered[i] if covered[i] > 0.0 else float("nan")
+            for i in range(n_bins)
+        ])
+
+    centers = [(i + 0.5) * bin_width for i in range(n_bins)]
+    means, lows, highs = [], [], []
+    for bin_index in range(n_bins):
+        values = [run[bin_index] for run in per_run if math.isfinite(run[bin_index])]
+        means.append(sum(values) / len(values) if values else float("nan"))
+        lows.append(quantile(values, 0.10))
+        highs.append(quantile(values, 0.90))
+    return centers, means, lows, highs
 
 
 def write_summary(rows, out_path, pop_size):
@@ -104,10 +160,25 @@ def write_summary(rows, out_path, pop_size):
 
 def plot_by_hop(grouped, means, field, ylabel, out_path, ref_y=None, log_y=False):
     fig, ax = plt.subplots(figsize=(7.2, 4.4))
-    for _, rows in grouped.items():
-        ax.plot([r["hop"] for r in rows], [r[field] for r in rows], color="#8aa0b8", alpha=0.18, linewidth=0.8)
-
-    ax.plot([r["hop"] for r in means], [r[field] for r in means], color="#1f4e79", linewidth=2.2, label="Mean across replicates")
+    min_replicates = max(2, math.ceil(len(grouped) / 2))
+    supported = [row for row in means if row["n"] >= min_replicates]
+    hops = [row["hop"] for row in supported]
+    ax.fill_between(
+        hops,
+        [row[f"{field}_q10"] for row in supported],
+        [row[f"{field}_q90"] for row in supported],
+        color="#1f4e79",
+        alpha=0.14,
+        linewidth=0,
+        label="Variation among replicates (10–90%)",
+    )
+    ax.plot(
+        hops,
+        [row[field] for row in supported],
+        color="#1f4e79",
+        linewidth=2.0,
+        label=f"Mean across replicates (≥{min_replicates} runs)",
+    )
     if ref_y is not None:
         ax.axhline(ref_y, color="#b13b2e", linestyle="--", linewidth=1.4, label=f"2N reference ({ref_y:g})")
 
@@ -119,18 +190,30 @@ def plot_by_hop(grouped, means, field, ylabel, out_path, ref_y=None, log_y=False
     ax.spines["right"].set_visible(False)
     ax.legend(frameon=False, loc="best")
     fig.tight_layout()
-    fig.savefig(out_path, dpi=300)
+    fig.savefig(out_path, dpi=300, facecolor="white")
     plt.close(fig)
 
 
-def plot_by_x(grouped, field, ylabel, out_path, ref_y=None, log_y=False):
+def plot_by_x(grouped, field, ylabel, out_path, ref_y=None, log_y=False, region_length=None):
     fig, ax = plt.subplots(figsize=(7.2, 4.4))
-    for _, rows in grouped.items():
-        ax.plot([r["current_x"] for r in rows], [r[field] for r in rows], color="#3b6f8f", alpha=0.22, linewidth=0.8)
+    centers, bin_means, bin_lows, bin_highs = position_weighted_bins(
+        grouped, field, region_length
+    )
+    if centers:
+        bin_width = region_length / len(centers)
+        bin_label = f"{bin_width / 1000:g}-kb bins" if bin_width >= 1000 else f"{bin_width:g}-bp bins"
+        ax.fill_between(
+            centers, bin_lows, bin_highs, color="#1f4e79", alpha=0.14,
+            linewidth=0, label="Variation among replicates (10–90%)"
+        )
+        ax.plot(
+            centers, bin_means, color="#1f4e79", linewidth=2.0,
+            label=f"Mean TMRCA across replicates ({bin_label})"
+        )
 
     if ref_y is not None:
         ax.axhline(ref_y, color="#b13b2e", linestyle="--", linewidth=1.4, label=f"2N reference ({ref_y:g})")
-        ax.legend(frameon=False, loc="best")
+    ax.legend(frameon=False, loc="best")
 
     ax.set_xlabel("Current position (bp, scientific notation)")
     ax.set_ylabel(ylabel)
@@ -139,25 +222,31 @@ def plot_by_x(grouped, field, ylabel, out_path, ref_y=None, log_y=False):
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=300)
+    fig.savefig(out_path, dpi=300, facecolor="white")
     plt.close(fig)
 
 
 def plot_by_fraction_traversed(grouped, field, ylabel, out_path, ref_y=None, log_y=False, region_length=None):
     fig, ax = plt.subplots(figsize=(7.2, 4.4))
-    for _, rows in grouped.items():
-        xs = [r["current_x"] for r in rows]
-        run_start = min(xs) if xs else 0.0
-        denom = region_length if region_length and region_length > 0.0 else (max(xs) - run_start)
-        if denom <= 0.0:
-            frac = [0.0 for _ in rows]
-        else:
-            frac = [(x - run_start) / denom for x in xs]
-        ax.plot(frac, [r[field] for r in rows], color="#3b6f8f", alpha=0.22, linewidth=0.8)
+    centers, bin_means, bin_lows, bin_highs = position_weighted_bins(
+        grouped, field, region_length
+    )
+    if centers:
+        frac_centers = [center / region_length for center in centers]
+        bin_width = region_length / len(centers)
+        bin_label = f"{bin_width / 1000:g}-kb bins" if bin_width >= 1000 else f"{bin_width:g}-bp bins"
+        ax.fill_between(
+            frac_centers, bin_lows, bin_highs, color="#1f4e79", alpha=0.14,
+            linewidth=0, label="Variation among replicates (10–90%)"
+        )
+        ax.plot(
+            frac_centers, bin_means, color="#1f4e79", linewidth=2.0,
+            label=f"Mean TMRCA across replicates ({bin_label})"
+        )
 
     if ref_y is not None:
         ax.axhline(ref_y, color="#b13b2e", linestyle="--", linewidth=1.4, label=f"2N reference ({ref_y:g})")
-        ax.legend(frameon=False, loc="best")
+    ax.legend(frameon=False, loc="best")
 
     ax.set_xlabel("Fraction of region traversed")
     ax.set_ylabel(ylabel)
@@ -166,7 +255,31 @@ def plot_by_fraction_traversed(grouped, field, ylabel, out_path, ref_y=None, log
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=300)
+    fig.savefig(out_path, dpi=300, facecolor="white")
+    plt.close(fig)
+
+
+def plot_example_by_x(grouped, field, ylabel, out_path, ref_y=None, region_length=None):
+    run, rows = next(iter(grouped.items()))
+    xs = [row["current_x"] for row in rows]
+    ys = [row[field] for row in rows]
+    if region_length and region_length > xs[-1]:
+        xs.append(region_length)
+        ys.append(ys[-1])
+
+    fig, ax = plt.subplots(figsize=(7.2, 4.4))
+    ax.step(xs, ys, where="post", color="#3b6f8f", linewidth=1.15,
+            label=f"Replicate {run} local TMRCA")
+    if ref_y is not None:
+        ax.axhline(ref_y, color="#b13b2e", linestyle="--", linewidth=1.4,
+                   label=f"2N reference ({ref_y:g})")
+    ax.set_xlabel("Current position (bp, scientific notation)")
+    ax.set_ylabel(ylabel)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.legend(frameon=False, loc="best")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=300, facecolor="white")
     plt.close(fig)
 
 
@@ -189,7 +302,7 @@ def plot_unary_fraction_by_hop(rows, out_path):
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=300)
+    fig.savefig(out_path, dpi=300, facecolor="white")
     plt.close(fig)
 
 
@@ -235,7 +348,7 @@ def plot_branch_length_composition(rows, out_path):
     ax.spines["right"].set_visible(False)
     ax.legend(frameon=False, loc="upper left")
     fig.tight_layout()
-    fig.savefig(out_path, dpi=300)
+    fig.savefig(out_path, dpi=300, facecolor="white")
     plt.close(fig)
 
 
@@ -264,8 +377,9 @@ def main():
 
     write_summary(rows, out_dir / f"{args.prefix}_summary.csv", args.pop_size)
     plot_by_hop(grouped, means, "root_time", "Local TMRCA / root time (generations)", out_dir / f"{args.prefix}_root_time_by_hop.png", ref_y=two_n)
-    plot_by_x(grouped, "root_time", "Local TMRCA / root time (generations)", out_dir / f"{args.prefix}_root_time_by_x.png", ref_y=two_n)
+    plot_by_x(grouped, "root_time", "Local TMRCA / root time (generations)", out_dir / f"{args.prefix}_root_time_by_x.png", ref_y=two_n, region_length=args.region_length)
     plot_by_fraction_traversed(grouped, "root_time", "Local TMRCA / root time (generations)", out_dir / f"{args.prefix}_root_time_by_fraction_traversed.png", ref_y=two_n, region_length=args.region_length)
+    plot_example_by_x(grouped, "root_time", "Local TMRCA / root time (generations)", out_dir / f"{args.prefix}_root_time_example_run0_by_x.png", ref_y=two_n, region_length=args.region_length)
     plot_by_hop(grouped, means, "standard_branch_length", "Standard active-tree branch length", out_dir / f"{args.prefix}_standard_branch_length_by_hop.png", log_y=True)
     plot_by_hop(grouped, means, "unary_parent_branch_length", "Unary-parent branch length", out_dir / f"{args.prefix}_unary_branch_length_by_hop.png", log_y=True)
     plot_by_hop(grouped, means, "rho", "Horizontal rate rho", out_dir / f"{args.prefix}_rho_by_hop.png", log_y=True)
