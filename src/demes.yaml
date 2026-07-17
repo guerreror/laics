@@ -11,6 +11,8 @@ demes:
   - name: pop0
     start_time: 10000
     ancestors: [root]
+    start_time: 10000
+    ancestors: [root]
     epochs:
       - start_size: 10000
         end_time: 0

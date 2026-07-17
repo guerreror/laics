@@ -166,6 +166,48 @@ static bool canCoalesceByContext_SMC(const TreeNode* a, const TreeNode* b) {
     return a->context == b->context;
 }
 
+static Context contextAfterSpeciationEvents_SMC(Context ctx,
+                                                const Parameters::ParameterData& params,
+                                                double t) {
+    if (params.speciation.empty() || params.speciation[0] != 1) {
+        return ctx;
+    }
+
+    const double eps = 1e-9;
+    for (size_t i = 1; i + 4 < params.speciation.size(); i += 5) {
+        const unsigned int sink = static_cast<unsigned int>(params.speciation[i]);
+        const unsigned int source = static_cast<unsigned int>(params.speciation[i + 1]);
+        const double eventTime = params.speciation[i + 2];
+        if (t + eps < eventTime) {
+            continue;
+        }
+
+        const unsigned int newSink = (sink > source) ? (sink - 1) : sink;
+        if (ctx.pop == source) {
+            ctx.pop = newSink;
+        } else if (ctx.pop > source) {
+            ctx.pop -= 1;
+        }
+    }
+    return ctx;
+}
+
+static void applySpeciationToLineageAtTime_SMC(TreeNode*& lineage,
+                                               double t,
+                                               const Parameters::ParameterData& params,
+                                               unsigned long& nextId) {
+    if (!lineage) return;
+    const Context newCtx = contextAfterSpeciationEvents_SMC(lineage->context, params, t);
+    if (newCtx == lineage->context) {
+        return;
+    }
+
+    TreeNode* nr = addUnaryAbove(lineage, nextId++, t, newCtx);
+    if (nr && nr->parent == nullptr) {
+        lineage = nr;
+    }
+}
+
 static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
                                           TreeNode*& cutRoot,
                                           double cutLineageTime,
@@ -191,6 +233,8 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
         TreeNode* nr = addUnaryAbove(cutRoot, nextId++, currentTime, cutRoot->context);
         if (nr && nr->parent == nullptr) cutRoot = nr;
     }
+    applySpeciationToLineageAtTime_SMC(mainRoot, currentTime, params, nextId);
+    applySpeciationToLineageAtTime_SMC(cutRoot, currentTime, params, nextId);
 
     std::vector<TreeNode*> lineages;
     lineages.push_back(mainRoot);
@@ -217,6 +261,9 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
         const double dt = randexp(Rate);
         const double event_time = currentTime + dt;
         currentTime = event_time;
+        for (auto*& lineage : lineages) {
+            applySpeciationToLineageAtTime_SMC(lineage, currentTime, params, nextId);
+        }
 
         const double roll = randreal(0, Rate);
         if (roll < totalC) {
@@ -360,6 +407,8 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
             auto it = std::upper_bound(epochs.breaks.begin(), epochs.breaks.end(), lineageTime);
             if (it != epochs.breaks.end() && event_time >= *it) {
                 lineageTime = *it;
+                unsigned long nextId = std::max(getMaxId(mainRoot), getMaxId(cutRoot)) + 1;
+                applySpeciationToLineageAtTime_SMC(cutRoot, lineageTime, params, nextId);
                 continue;
             }
         }
@@ -396,6 +445,8 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
                 auto it = std::upper_bound(epochs.breaks.begin(), epochs.breaks.end(), lineageTime);
                 if (it != epochs.breaks.end()) {
                     lineageTime = *it;
+                    unsigned long nextId = std::max(getMaxId(mainRoot), getMaxId(cutRoot)) + 1;
+                    applySpeciationToLineageAtTime_SMC(cutRoot, lineageTime, params, nextId);
                     continue;
                 }
             }
@@ -486,6 +537,10 @@ unsigned short World::simulateGeneration_SMC(vector<vector<double>>& mig_prob) {
     int nEvents = 0;
     double Rate = totalM + totalC;
     if (Rate == 0.0) {
+        if (!worldData->epochs_over) {
+            updateToNextEpoch_SMC();
+            return 0;
+        }
         forceAllCoal();
         return 0;
     }
@@ -503,7 +558,11 @@ unsigned short World::simulateGeneration_SMC(vector<vector<double>>& mig_prob) {
     }
 
     if (sitesCoalesced()) {
-        forceAllCoal();
+        if (!worldData->epochs_over) {
+            updateToNextEpoch_SMC();
+        } else {
+            forceAllCoal();
+        }
     }
 
     return nEvents;
@@ -533,6 +592,12 @@ void World::updateToNextEpoch_SMC() {
         switch (worldData->epochType[outof_epoch]) {
             case 0:
                 freqStepToLoss();
+                break;
+            case 1:
+                speciation();
+                break;
+            case 2:
+                demoChange();
                 break;
             default:
                 break;

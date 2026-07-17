@@ -169,7 +169,13 @@ unsigned short World::simulateGeneration(vector < vector <double> > & mig_prob){
         }
     }
     
-    if( sitesCoalesced()) forceAllCoal();
+    if (sitesCoalesced()) {
+        if (!worldData->epochs_over) {
+            updateToNextEpoch();
+        } else {
+            forceAllCoal();
+        }
+    }
     
     return nEvents;
 }

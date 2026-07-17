@@ -490,7 +490,7 @@ int main(int argc, const char *argv[])
         if (writeAllDiagnostics) {
             std::ofstream hoplog(pathJoin(output_dir, "smc_hop_trace.csv"));
             if (hoplog.is_open()) {
-                hoplog << "hop,current_x,raw_delta_x,used_delta_x,next_x,rho,Li_sum,Ls_sum\n";
+                hoplog << "hop,current_x,raw_delta_x,used_delta_x,next_x,rho,Li_sum,Ls_sum,root_time\n";
                 hopTraceHeaderWritten = true;
             }
             std::ofstream hop_events(pathJoin(output_dir, "smc_hop_events.csv"));
@@ -611,6 +611,14 @@ int main(int argc, const char *argv[])
             }
             double nextX = currentX + hopDelta;
 
+            const double activeEps = 1e-12;
+            geneFluxActive.erase(
+                std::remove_if(geneFluxActive.begin(), geneFluxActive.end(),
+                               [currentX, activeEps](const GeneFluxEvent_SMC& evt) {
+                                   return evt.endX <= currentX + activeEps;
+                               }),
+                geneFluxActive.end());
+
             if (!geneFluxActive.empty()) {
                 size_t minIdx = 0;
                 for (size_t i = 1; i < geneFluxActive.size(); ++i) {
@@ -624,6 +632,10 @@ int main(int argc, const char *argv[])
                     geneFluxLog.push_back(minEvt);
                     geneFluxActive.erase(geneFluxActive.begin() + static_cast<long>(minIdx));
                 }
+            }
+            const double finalHopDelta = nextX - currentX;
+            if (finalHopDelta <= 0.0) {
+                continue;
             }
 
             bool writeThisHop = writeAllDiagnostics;
@@ -678,14 +690,16 @@ int main(int argc, const char *argv[])
                 ensureHopTraceHeader();
                 std::ofstream hoplog(pathJoin(output_dir, "smc_hop_trace.csv"), std::ios::app);
                 if (hoplog.is_open()) {
+                    hoplog << std::setprecision(17);
                     hoplog << hop << ","
                            << currentX << ","
                            << rawHopDelta << ","
-                           << hopDelta << ","
+                           << finalHopDelta << ","
                            << nextX << ","
                            << rho << ","
                            << Li_sum << ","
-                           << Ls_sum << "\n";
+                           << Ls_sum << ","
+                           << (activeTree ? activeTree->time : 0.0) << "\n";
                 }
             }
             if (writeThisHop) {
@@ -700,7 +714,7 @@ int main(int argc, const char *argv[])
                                << "hop_summary,"
                                << ","
                                << rawHopDelta << ","
-                               << hopDelta << ","
+                               << finalHopDelta << ","
                                << nextX << "\n";
                 }
             }
