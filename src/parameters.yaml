@@ -2,11 +2,33 @@
 seed: "8"
 nruns: "10"
 
+<<<<<<< HEAD
 kingman_coal: "1"
 drift_sim: "0"
 msOutput: "0"
 
 inv_freq: "0"
+=======
+seed: "0"
+nruns: "10"
+kingman_coal: "1"
+drift_sim: "0"
+msOutput: "1"
+inv_freq: "0.2 0.2"
+inv_age: "10000"
+BasesPerMorgan: "1e8"
+randPhi: "0"
+phi: "0.0"
+invRange: "0 100000"
+fixedSNPs: "1 2 1e-6"
+randSNPs: "1"
+snpPositions: "0"
+randomSample: "0"
+tempRead: "0 2"
+nCarriers: "0 2"
+nCarriers1: "10 0"
+nCarriers2: "10 0"
+>>>>>>> origin/speciation
 ancestor_frequencies:
   root: 0
 
