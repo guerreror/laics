@@ -258,7 +258,16 @@ int main(int argc, const char *argv[])
     vector<vector<double>> mig_prob_cut;
     size_t next_idx = 0;
 
-    if (!schedule.empty()) {
+    auto resetMigrationState = [&]() {
+        mig_prob.clear();
+        mig_prob_cut.clear();
+        next_idx = 0;
+        if (schedule.empty()) {
+            mig_prob = buildMigMatrix(params);
+            mig_prob_cut = mig_prob;
+            return;
+        }
+
         double g0 = 0.0;
         while (next_idx < schedule.size() && schedule[next_idx].first <= g0) {
             mig_prob = adaptMatrixForPops(schedule[next_idx].second, params.paramData->popSizeVec.size());
@@ -268,13 +277,22 @@ int main(int argc, const char *argv[])
             mig_prob = adaptMatrixForPops(schedule.front().second, params.paramData->popSizeVec.size());
         }
         mig_prob_cut = mig_prob;
-    } else {
-        mig_prob = buildMigMatrix(params);
-        mig_prob_cut = mig_prob;
+    };
+
+    {
+        std::ofstream hoplog("smc_hop_trace.csv");
+        if (hoplog.is_open()) {
+            hoplog << "run,hop,current_x,raw_delta_x,used_delta_x,next_x,rho,Li_sum,Ls_sum,root_time\n";
+        }
+        std::ofstream hop_events("smc_hop_events.csv");
+        if (hop_events.is_open()) {
+            hop_events << "run,hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
+        }
     }
 
     for (int timer = 0; timer < (int)nRuns; ++timer)
     {
+        resetMigrationState();
         params.setPhi();
         params.setSNPs();
         params.setCarriers();
@@ -328,16 +346,6 @@ int main(int argc, const char *argv[])
         vector<EdgeWeight> last_standard_edges;
         vector<EdgeWeight> last_inverted_edges;
         vector<bool> targetEmitted(params.paramData->targetSNPs.size(), false);
-        {
-            std::ofstream hoplog("smc_hop_trace.csv");
-            if (hoplog.is_open()) {
-                hoplog << "hop,current_x,raw_delta_x,used_delta_x,next_x,rho,Li_sum,Ls_sum,root_time\n";
-            }
-            std::ofstream hop_events("smc_hop_events.csv");
-            if (hop_events.is_open()) {
-                hop_events << "hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
-            }
-        }
 
         int hop = 0;
         while (currentX < params.paramData->smcRange.R) {
@@ -400,6 +408,17 @@ int main(int argc, const char *argv[])
             }
 
             if (!ok) {
+                std::ofstream hop_events("smc_hop_events.csv", std::ios::app);
+                if (hop_events.is_open()) {
+                    for (const auto& row : outcome.eventRows) {
+                        hop_events << timer << "," << row;
+                    }
+                    hop_events << timer << ","
+                               << hop << ","
+                               << currentX << ","
+                               << "reattach_failed,"
+                               << ",,,\n";
+                }
                 freeTree(workingTree);
                 std::cerr << "SMC cut-tree step failed to reattach.\n";
                 break;
@@ -500,7 +519,8 @@ int main(int argc, const char *argv[])
                 std::ofstream hoplog("smc_hop_trace.csv", std::ios::app);
                 if (hoplog.is_open()) {
                     hoplog << std::setprecision(17);
-                    hoplog << hop << ","
+                    hoplog << timer << ","
+                           << hop << ","
                            << currentX << ","
                            << rawHopDelta << ","
                            << finalHopDelta << ","
@@ -515,9 +535,10 @@ int main(int argc, const char *argv[])
                 std::ofstream hop_events("smc_hop_events.csv", std::ios::app);
                 if (hop_events.is_open()) {
                     for (const auto& row : outcome.eventRows) {
-                        hop_events << row;
+                        hop_events << timer << "," << row;
                     }
-                    hop_events << hop << ","
+                    hop_events << timer << ","
+                               << hop << ","
                                << currentX << ","
                                << "hop_summary,"
                                << ","
@@ -573,7 +594,6 @@ int main(int argc, const char *argv[])
         }
 
         delete world;
-        break;
     }
 
     end = std::chrono::system_clock::now();

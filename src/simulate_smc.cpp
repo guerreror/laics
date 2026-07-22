@@ -192,12 +192,56 @@ static Context contextAfterSpeciationEvents_SMC(Context ctx,
     return ctx;
 }
 
-static void applySpeciationToLineageAtTime_SMC(TreeNode*& lineage,
-                                               double t,
-                                               const Parameters::ParameterData& params,
-                                               unsigned long& nextId) {
+static Context contextAfterEpochEvents_SMC(Context ctx,
+                                           const Parameters::ParameterData& params,
+                                           double t) {
+    ctx = contextAfterSpeciationEvents_SMC(ctx, params, t);
+
+    const double eps = 1e-9;
+    if (params.inv_age > 0 && t + eps >= static_cast<double>(params.inv_age) &&
+        ctx.inversion == 1) {
+        // This mirrors World::freqStepToLoss(): beyond inversion age all
+        // inversion contexts collapse to the ancestral origin context.
+        ctx.pop = 0;
+        ctx.inversion = 0;
+    }
+    return ctx;
+}
+
+static bool nextModelEpochAfter_SMC(const Parameters::ParameterData& params,
+                                    double currentTime,
+                                    double& nextEpoch) {
+    const double eps = 1e-9;
+    bool found = false;
+    double best = 0.0;
+    auto consider = [&](double t) {
+        if (t > currentTime + eps && (!found || t < best)) {
+            best = t;
+            found = true;
+        }
+    };
+
+    if (params.inv_age > 0) {
+        consider(static_cast<double>(params.inv_age));
+    }
+    if (!params.speciation.empty() && params.speciation[0] == 1) {
+        for (size_t i = 1; i + 4 < params.speciation.size(); i += 5) {
+            consider(params.speciation[i + 2]);
+        }
+    }
+
+    if (found) {
+        nextEpoch = best;
+    }
+    return found;
+}
+
+static void applyEpochEventsToLineageAtTime_SMC(TreeNode*& lineage,
+                                                double t,
+                                                const Parameters::ParameterData& params,
+                                                unsigned long& nextId) {
     if (!lineage) return;
-    const Context newCtx = contextAfterSpeciationEvents_SMC(lineage->context, params, t);
+    const Context newCtx = contextAfterEpochEvents_SMC(lineage->context, params, t);
     if (newCtx == lineage->context) {
         return;
     }
@@ -233,8 +277,8 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
         TreeNode* nr = addUnaryAbove(cutRoot, nextId++, currentTime, cutRoot->context);
         if (nr && nr->parent == nullptr) cutRoot = nr;
     }
-    applySpeciationToLineageAtTime_SMC(mainRoot, currentTime, params, nextId);
-    applySpeciationToLineageAtTime_SMC(cutRoot, currentTime, params, nextId);
+    applyEpochEventsToLineageAtTime_SMC(mainRoot, currentTime, params, nextId);
+    applyEpochEventsToLineageAtTime_SMC(cutRoot, currentTime, params, nextId);
 
     std::vector<TreeNode*> lineages;
     lineages.push_back(mainRoot);
@@ -258,11 +302,22 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
             return false;
         }
 
+        const double startTime = currentTime;
         const double dt = randexp(Rate);
         const double event_time = currentTime + dt;
+        double nextEpoch = 0.0;
+        if (nextModelEpochAfter_SMC(params, startTime, nextEpoch) &&
+            event_time >= nextEpoch) {
+            currentTime = nextEpoch;
+            for (auto*& lineage : lineages) {
+                applyEpochEventsToLineageAtTime_SMC(lineage, currentTime, params, nextId);
+            }
+            continue;
+        }
+
         currentTime = event_time;
         for (auto*& lineage : lineages) {
-            applySpeciationToLineageAtTime_SMC(lineage, currentTime, params, nextId);
+            applyEpochEventsToLineageAtTime_SMC(lineage, currentTime, params, nextId);
         }
 
         const double roll = randreal(0, Rate);
@@ -276,6 +331,25 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
                 }
             }
             if (pairs.empty()) {
+                if (totalM <= 0.0 && totalG <= 0.0) {
+                    double nextEpoch = 0.0;
+                    if (nextModelEpochAfter_SMC(params, currentTime, nextEpoch)) {
+                        currentTime = nextEpoch;
+                        for (auto*& lineage : lineages) {
+                            applyEpochEventsToLineageAtTime_SMC(lineage, currentTime, params, nextId);
+                        }
+                        continue;
+                    }
+                    std::ostringstream reason;
+                    reason << "incompatible_context_fallback"
+                           << "_main_p" << (lineages.size() > 0 ? lineages[0]->context.pop : 9999)
+                           << "_i" << (lineages.size() > 0 ? lineages[0]->context.inversion : 9999)
+                           << "_cut_p" << (lineages.size() > 1 ? lineages[1]->context.pop : 9999)
+                           << "_i" << (lineages.size() > 1 ? lineages[1]->context.inversion : 9999);
+                    recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX,
+                                       reason.str(), currentTime);
+                    return false;
+                }
                 continue;
             }
 
@@ -390,6 +464,29 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
         double waiting_t = randexp(Rate);
         double event_time = lineageTime + waiting_t;
 
+        bool crossedEpoch = false;
+        double nextEpoch = 0.0;
+        if (!epochs.breaks.empty()) {
+            auto it = std::upper_bound(epochs.breaks.begin(), epochs.breaks.end(), lineageTime);
+            if (it != epochs.breaks.end() && event_time >= *it) {
+                nextEpoch = *it;
+                crossedEpoch = true;
+            }
+        }
+        double modelEpoch = 0.0;
+        if (nextModelEpochAfter_SMC(params, lineageTime, modelEpoch) &&
+            event_time >= modelEpoch &&
+            (!crossedEpoch || modelEpoch < nextEpoch)) {
+            nextEpoch = modelEpoch;
+            crossedEpoch = true;
+        }
+        if (crossedEpoch && nextEpoch < root_time) {
+            lineageTime = nextEpoch;
+            unsigned long nextId = std::max(getMaxId(mainRoot), getMaxId(cutRoot)) + 1;
+            applyEpochEventsToLineageAtTime_SMC(cutRoot, lineageTime, params, nextId);
+            continue;
+        }
+
         if (event_time >= root_time) {
             if (resolveAboveRootByMiniSMC_SMC(mainRoot, cutRoot, lineageTime, params, mig_prob, currentHopX, outcome, evlog, hopIndex, root_time)) {
                 return true;
@@ -401,16 +498,6 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
                 outcome->stopTime = root_time;
             }
             return false;
-        }
-
-        if (!epochs.breaks.empty()) {
-            auto it = std::upper_bound(epochs.breaks.begin(), epochs.breaks.end(), lineageTime);
-            if (it != epochs.breaks.end() && event_time >= *it) {
-                lineageTime = *it;
-                unsigned long nextId = std::max(getMaxId(mainRoot), getMaxId(cutRoot)) + 1;
-                applySpeciationToLineageAtTime_SMC(cutRoot, lineageTime, params, nextId);
-                continue;
-            }
         }
 
         double roll = randreal(0, Rate);
@@ -446,7 +533,7 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
                 if (it != epochs.breaks.end()) {
                     lineageTime = *it;
                     unsigned long nextId = std::max(getMaxId(mainRoot), getMaxId(cutRoot)) + 1;
-                    applySpeciationToLineageAtTime_SMC(cutRoot, lineageTime, params, nextId);
+                    applyEpochEventsToLineageAtTime_SMC(cutRoot, lineageTime, params, nextId);
                     continue;
                 }
             }
