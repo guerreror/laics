@@ -159,11 +159,11 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
     paramData->phi_range = vector<double>(std::istream_iterator<double>(iss), std::istream_iterator<double>());
     if (paramData->randPhi)
     {
-        std::cerr << "Random gene flux (phi) range = " << paramData->phi_range[0] << " - " << paramData->phi_range[1] << '\n';
+        std::cerr << "Legacy ARG gene flux (phi) range = " << paramData->phi_range[0] << " - " << paramData->phi_range[1] << '\n';
     }
     else
     {
-        std::cerr << "Gene flux (phi) = " << paramData->phi_range[0] << '\n';
+        std::cerr << "Legacy ARG gene flux (phi) = " << paramData->phi_range[0] << '\n';
     }
 
     // Inversion range (param_vec[13])

@@ -30,8 +30,6 @@ parameters = {
     "inv_age":      "0",
     "migRate":      "0.02",
     "BasesPerMorgan":"1e8",
-    "randPhi":      "0",
-    "phi":          "0.2",
     "invRange":     "0 1e3",
     "fixedSNPs":    "1 10 1e-6",
     "randSNPs":       "0",
@@ -478,8 +476,16 @@ def _collect_per_pop_strings(parameters: dict, pops: int, random_flag: str):
 base_keys_order = [
     "seed","nruns","kingman_coal","drift_sim","msOutput",
     "popSizeVec","inv_freq","speciation","demography","inv_age",
-    "migRate","BasesPerMorgan","randPhi","phi","invRange","fixedSNPs",
+    "migRate","BasesPerMorgan","invRange","fixedSNPs",
     "randSNPs","snpPositions","randomSample",
+]
+cpp_args_order_before_legacy_phi = [
+    "seed","nruns","kingman_coal","drift_sim","msOutput",
+    "popSizeVec","inv_freq","speciation","demography","inv_age",
+    "migRate","BasesPerMorgan",
+]
+cpp_args_order_after_legacy_phi = [
+    "invRange","fixedSNPs","randSNPs","snpPositions","randomSample",
 ]
 
 # Build the tail according to randomSample rule
@@ -488,7 +494,13 @@ random_flag = parameters.get("randomSample","0").strip()
 per_pop_strings = _collect_per_pop_strings(parameters, pops, random_flag)
 
 # Compose final argv list
-args_list = [parameters[k] for k in base_keys_order] + per_pop_strings
+legacy_phi_args = ["0", "0"]
+args_list = (
+    [parameters[k] for k in cpp_args_order_before_legacy_phi] +
+    legacy_phi_args +
+    [parameters[k] for k in cpp_args_order_after_legacy_phi] +
+    per_pop_strings
+)
 if smc_flag == "1":
     args_list += [parameters["verbose"], parameters["target_snp"], parameters["gc"], parameters["dr"]]
 

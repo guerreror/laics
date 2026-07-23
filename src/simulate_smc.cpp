@@ -25,6 +25,8 @@ using std::vector;
 
 static const double SMC_DEBUG_MIGRATION_BOOST = 1.0;
 
+static double triangleHeightAtX_SMC(double x, const Segment& range, double peakHeight);
+
 static void recordEventRow_SMC(SMCStepOutcome* outcome,
                                std::ofstream& evlog,
                                int hopIndex,
@@ -83,17 +85,20 @@ static double computeTotalC_SMC(const Parameters::ParameterData& params) {
 
 static double computeTotalG_SMC(const TreeNode* cutRoot,
                                 const Parameters::ParameterData& params,
-                                double /*currentHopX*/) {
+                                double currentHopX) {
     if (!cutRoot) return 0.0;
     const unsigned int pop = cutRoot->context.pop;
     if (pop >= params.initialFreqs.size()) return 0.0;
 
+    const double localPhi =
+        std::max(0.0, params.gcRate) +
+        triangleHeightAtX_SMC(currentHopX, params.smcRange, std::max(0.0, params.drRate));
     const double invFreq = params.initialFreqs[pop];
     const double stdFreq = 1.0 - invFreq;
     if (cutRoot->context.inversion == 0) {
-        return params.phi * invFreq;
+        return localPhi * invFreq;
     }
-    return params.phi * stdFreq;
+    return localPhi * stdFreq;
 }
 
 static double drawGeneFluxSegmentLength_SMC(double /*currentHopX*/) {
@@ -200,8 +205,6 @@ static Context contextAfterEpochEvents_SMC(Context ctx,
     const double eps = 1e-9;
     if (params.inv_age > 0 && t + eps >= static_cast<double>(params.inv_age) &&
         ctx.inversion == 1) {
-        // This mirrors World::freqStepToLoss(): beyond inversion age all
-        // inversion contexts collapse to the ancestral origin context.
         ctx.pop = 0;
         ctx.inversion = 0;
     }
