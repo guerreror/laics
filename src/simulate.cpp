@@ -253,18 +253,16 @@ void World::demoChange() {
 
 
 void World::speciation() {
-    // Epoch payload: [A, B, (optional R)]
+    // Epoch payload: [A, B, R], where R is the demes-derived ancestor size.
     const auto& payload = worldData->epochPopSizes[worldData->current_epoch];
-    if (payload.size() < 2) {
-        std::cerr << "[Speciation] ERROR: event payload too short.\n";
-        return;
+    if (payload.size() < 3) {
+        std::cerr << "[Speciation] ERROR: event payload must include demes-derived result size R.\n";
+        exit(1);
     }
     unsigned int A = payload[0]; // sink
     unsigned int B = payload[1]; // source
+    unsigned int R = payload[2];
     double newFreq = worldData->epochValues[worldData->current_epoch];
-
-    bool hasR = (payload.size() >= 3);
-    unsigned int R = hasR ? payload[2] : 0;
 
     // Snapshot old cluster & freqs BEFORE we change anything
     const auto oldCluster = cluster;
@@ -277,13 +275,7 @@ void World::speciation() {
     //           << A << "=" << beforeA << " carriers, pop "
     //           << B << "=" << beforeB << " carriers\n";
 
-    if (hasR) {
-        // std::cerr << "[Speciation] Using result size R=" << R << " from demes.\n";
-        worldData->popSize[A] = R;
-    } else {
-        // std::cerr << "[Speciation] No result size provided; using A += B fallback.\n";
-        worldData->popSize[A] += worldData->popSize[B];
-    }
+    worldData->popSize[A] = R;
     worldData->popSize.erase(worldData->popSize.begin() + B);
 
     unsigned int newA = (A > B) ? (A - 1) : A;

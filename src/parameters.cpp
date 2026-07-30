@@ -159,11 +159,11 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
     paramData->phi_range = vector<double>(std::istream_iterator<double>(iss), std::istream_iterator<double>());
     if (paramData->randPhi)
     {
-        std::cerr << "Legacy ARG gene flux (phi) range = " << paramData->phi_range[0] << " - " << paramData->phi_range[1] << '\n';
+        std::cerr << " ARG gene flux (phi) range = " << paramData->phi_range[0] << " - " << paramData->phi_range[1] << '\n';
     }
     else
     {
-        std::cerr << "Legacy ARG gene flux (phi) = " << paramData->phi_range[0] << '\n';
+        std::cerr << " ARG gene flux (phi) = " << paramData->phi_range[0] << '\n';
     }
 
     // Inversion range (param_vec[13])
@@ -244,26 +244,25 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
     if (randomSample)
     {
         // ---- RANDOM == 1 ----
-        // Expect exactly ONE string (param_vec[18]) named "tempRead" with <pops> integers.
         if (param_vec.size() <= base) {
-            std::cerr << "Error: randomSample==1 requires one 'tempRead' string at param_vec[18] "
+            std::cerr << "Error: randomSample==1 requires one sample-count string at param_vec[18] "
                     << "with " << pops << " integers (one per population).\n";
             exit(1);
         }
 
         std::istringstream iss_local(param_vec[base]);
-        std::vector<int> tempRead((std::istream_iterator<int>(iss_local)),
-                                std::istream_iterator<int>());
+        std::vector<int> sampleSizes((std::istream_iterator<int>(iss_local)),
+                                     std::istream_iterator<int>());
 
-        if (tempRead.size() != pops) {
-            std::cerr << "Inconsistent number of sample sizes in tempRead: got "
-                    << tempRead.size() << ", expected " << pops << " (one per population).\n";
+        if (sampleSizes.size() != pops) {
+            std::cerr << "Inconsistent number of random sample sizes: got "
+                    << sampleSizes.size() << ", expected " << pops << " (one per population).\n";
             exit(1);
         }
 
         for (unsigned int p = 0; p < pops; ++p) {
-            int invcount = randbinom(tempRead[p], paramData->initialFreqs.at(p));
-            paramData->nCarriers.at(p).push_back(tempRead[p] - invcount); // standard
+            int invcount = randbinom(sampleSizes[p], paramData->initialFreqs.at(p));
+            paramData->nCarriers.at(p).push_back(sampleSizes[p] - invcount); // standard
             paramData->nCarriers.at(p).push_back(invcount);               // inverted
         }
     }
@@ -271,13 +270,12 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
     {
         // ---- RANDOM == 0 ----
         // Expect EXACTLY <pops> per-pop strings starting at param_vec[18].
-        // The FIRST one can be named "tempRead" and is simply used as Pop 0's pair.
         // Each string must contain exactly TWO integers: "<standard> <inverted>".
         if (param_vec.size() < base + pops) {
             std::size_t provided = (param_vec.size() > base) ? (param_vec.size() - base) : 0;
             std::cerr << "Error: randomSample==0 requires " << pops
                     << " per-pop sample strings starting at param_vec[18] "
-                    << "(the first may be 'tempRead'), but only " << provided
+                    << "but only " << provided
                     << " provided.\n";
             exit(1);
         }
@@ -285,7 +283,7 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
         int totalSample = 0;
 
         for (unsigned int p = 0; p < pops; ++p) {
-            std::cerr << "Sample in Pop " << p << ": ";
+            std::cerr << "Sample in pop" << p << ": ";
 
             std::istringstream iss_local(param_vec[base + p]);
             std::vector<int> pairVals((std::istream_iterator<int>(iss_local)),
@@ -340,7 +338,7 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
         paramData->drRate = std::stod(param_vec[outputBase + 3]);
     }
 
-    std::cerr << "SMC verbose diagnostics? " << paramData->smcVerbose << '\n';
+    std::cerr << "Verbose " << paramData->smcVerbose << '\n';
     if (paramData->targetSNPs.empty()) {
         std::cerr << "SMC target SNP diagnostics: none\n";
     } else {
@@ -350,8 +348,8 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
         }
         std::cerr << '\n';
     }
-    std::cerr << "SMC GC rectangle height = " << paramData->gcRate << '\n';
-    std::cerr << "SMC DR triangle peak height = " << paramData->drRate << '\n';
+    std::cerr << "Gene Conversion Rate: " << paramData->gcRate << '\n';
+    std::cerr << "Double Recombination Rate: " << paramData->drRate << '\n';
 }
 
 Parameters::~Parameters(){

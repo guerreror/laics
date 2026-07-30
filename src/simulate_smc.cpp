@@ -1,4 +1,4 @@
-/** simulate_smc.cpp
+/** 
  *  SMC-specific simulation: migration + coalescence + gene flux on editable trees.
  */
 

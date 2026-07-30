@@ -10,11 +10,19 @@ import json
 from collections import defaultdict, deque
 
 # ---------- File paths ----------
-PARAMETERS_YAML      = "src/parameters.yaml"
 DEMES_YAML      = "src/demes.yaml"
 MIGRATION_JSON  = "src/migration_matrices.json"
 EXECUTABLE_ARG  = "./executables/labp_v21"
 EXECUTABLE_SMC  = "./executables/labp_smc"
+
+cli = argparse.ArgumentParser(description="Run laBP ARG or SMC from a YAML config.")
+cli.add_argument(
+    "--config",
+    required=True,
+    help="Parameter YAML to load, e.g. src/parameters_smc.yaml or src/parameters_arg.yaml.",
+)
+cli_args = cli.parse_args()
+PARAMETERS_YAML = cli_args.config
 
 # ---------- Defaults ----------
 parameters = {
@@ -30,17 +38,69 @@ parameters = {
     "inv_age":      "0",
     "migRate":      "0.02",
     "BasesPerMorgan":"1e8",
+    "randPhi":      "0",
+    "phi":          "0.2",
     "invRange":     "0 1e3",
     "fixedSNPs":    "1 10 1e-6",
     "randSNPs":       "0",
     "snpPositions": "500 550 600 650 700 750 800 850 900 950",
     "randomSample": "0",
-    "tempRead":     "10 0",
+    "pop0":         "10 0",
     "smc":          "0",
     "verbose":      "1",
     "target_snp":   "",
     "gc":           "1.0",
     "dr":           "1.0",
+}
+
+YAML_KEY_ALIASES = {
+    "Seed": "seed",
+    "NumberOfReplicates": "nruns",
+    "KingmanCoal": "kingman_coal",
+    "DriftSimulation": "drift_sim",
+    "MSOutput": "msOutput",
+    "InversionFrequency": "inv_freq",
+    "InversionAge": "inv_age",
+    "MigrationRate": "migRate",
+    "RandPhi": "randPhi",
+    "Phi": "phi",
+    "InversionRange": "invRange",
+    "FixedSNPs": "fixedSNPs",
+    "RandomSNPs": "randSNPs",
+    "SiteNodePositions": "snpPositions",
+    "RandomSample": "randomSample",
+    "SMC": "smc",
+    "Verbose": "verbose",
+    "TargetSNPs": "target_snp",
+    "GeneConversionRate": "gc",
+    "DoubleRecombinationRate": "dr",
+}
+
+DISPLAY_KEY_NAMES = {
+    "seed": "Seed",
+    "nruns": "NumberOfReplicates",
+    "kingman_coal": "KingmanCoal",
+    "drift_sim": "DriftSimulation",
+    "msOutput": "MSOutput",
+    "popSizeVec": "PopulationSizes",
+    "inv_freq": "InversionFrequency",
+    "speciation": "Speciation",
+    "demography": "Demography",
+    "inv_age": "InversionAge",
+    "migRate": "MigrationRate",
+    "BasesPerMorgan": "BasesPerMorgan",
+    "randPhi": "RandPhi",
+    "phi": "Phi",
+    "invRange": "InversionRange",
+    "fixedSNPs": "FixedSNPs",
+    "randSNPs": "RandomSNPs",
+    "snpPositions": "SiteNodePositions",
+    "randomSample": "RandomSample",
+    "smc": "SMC",
+    "verbose": "Verbose",
+    "target_snp": "TargetSNPs",
+    "gc": "GeneConversionRate",
+    "dr": "DoubleRecombinationRate",
 }
 
 # ---------- Helpers for demes ----------
@@ -164,7 +224,7 @@ def write_migration_matrices_from_demes(graph, out_json=MIGRATION_JSON):
     with open(out_json, "w") as f:
         json.dump(payload, f, indent=4)
 
-    print(f"Wrote {out_json} with matrices at times: {list(payload.keys())}")
+    print(f"\n\nWrote {out_json} file with matrices at times: {list(payload.keys())}")
 
 # ---------- Speciation (sizes + events) ----------
 def build_speciation_from_demes(graph, ancestor_freqs=None, default_F=0.2):
@@ -201,10 +261,10 @@ def build_speciation_from_demes(graph, ancestor_freqs=None, default_F=0.2):
         if ancestor_freqs is None:
             return float(default_F)
         if parent not in ancestor_freqs:
-            raise ValueError(f"ancestor_frequencies is missing a value for internal node '{parent}'")
+            raise ValueError(f"AncestorFrequencies is missing a value for internal node '{parent}'")
         F = float(ancestor_freqs[parent])
         if not (0.0 <= F <= 1.0):
-            raise ValueError(f"ancestor_frequencies['{parent}'] must be in [0,1], got {F}")
+            raise ValueError(f"AncestorFrequencies['{parent}'] must be in [0,1], got {F}")
         return F
 
     def leaves_under_name(name):
@@ -325,7 +385,7 @@ def build_demography_from_demes_full(graph, leaf_order, spec_events):
     return " ".join(demog_entries), dbg_lines
 
 
-# ---------- Load parameters.yaml ----------
+# ---------- Load parameter YAML ----------
 try:
     with open(PARAMETERS_YAML, 'r') as f:
         other_params = yaml.safe_load(f) or {}
@@ -333,23 +393,35 @@ except Exception as e:
     print(f"Error loading {PARAMETERS_YAML}: {e}", file=sys.stderr)
     sys.exit(1)
 
-# Copy keys from parameters.yaml
+# Copy keys from parameter YAML
 for key, val in (other_params or {}).items():
+    key = YAML_KEY_ALIASES.get(str(key), str(key))
     # copy any known key from defaults
     if key in parameters:
         parameters[key] = str(val)
         continue
-    # ALSO copy any per-pop sample strings like nCarriers, nCarriers1, ...
-    if key.startswith("nCarriers"):
+    # Copy user-facing per-pop sample strings: pop0, pop1, pop2, ...
+    if re.fullmatch(r"pop\d+", key):
         parameters[key] = str(val)
 
 smc_flag = parameters.get("smc", "0").strip()
 EXECUTABLE = EXECUTABLE_SMC if smc_flag == "1" else EXECUTABLE_ARG
 
-ancestor_freqs = other_params.get("ancestor_frequencies", None)
+ancestor_freqs = other_params.get("AncestorFrequencies", other_params.get("ancestor_frequencies", None))
 if ancestor_freqs is not None and not isinstance(ancestor_freqs, dict):
-    print("Error: 'ancestor_frequencies' in parameters.yaml must be a mapping (dict).", file=sys.stderr)
+    print(f"Error: 'AncestorFrequencies' in {PARAMETERS_YAML} must be a mapping (dict).", file=sys.stderr)
     sys.exit(1)
+
+samples_block = other_params.get("Samples", other_params.get("samples", None))
+if samples_block is not None:
+    if not isinstance(samples_block, dict):
+        print(f"Error: 'Samples' in {PARAMETERS_YAML} must be a mapping (dict).", file=sys.stderr)
+        sys.exit(1)
+    for key, val in samples_block.items():
+        if not re.fullmatch(r"pop\d+", str(key)):
+            print(f"Error: samples key '{key}' must look like pop0, pop1, ...", file=sys.stderr)
+            sys.exit(1)
+        parameters[str(key)] = str(val)
 
 DEFAULT_ANCESTOR_F = 0.2
 
@@ -407,7 +479,7 @@ if mig_rate is not None:
     parameters["migRate"] = f"{mig_rate:g}"
 
 # ---------- Debug prints ----------
-print("\n=== Parsed speciation tree (past → present) ===")
+print("\n\n--------Parsed speciation tree (past -> present)--------\n")
 ascii_tree = render_tree_ascii(graph, only_these_leaves=debug_info["leaf_order"])
 print(ascii_tree)
 
@@ -430,97 +502,72 @@ def _ints_in_str(s: str):
         raise ValueError(f"Expected integers in '{s}'.")
 
 def _collect_per_pop_strings(parameters: dict, pops: int, random_flag: str):
-    """
-    Returns a list of sample strings to send at the tail of argv,
-    matching the C++ expectations:
-      - If random == "1": returns [ tempRead ] (must contain `pops` ints)
-      - If random == "0": returns [ tempRead, nCarriers, nCarriers1, ... ] (length == pops),
-                          each must contain exactly 2 ints.
-    Raises ValueError on mismatch.
-    """
+    pop_keys = [f"pop{i}" for i in range(pops)]
     if random_flag == "1":
-        if "tempRead" not in parameters:
-            raise ValueError("randomSample==1 requires 'tempRead'.")
-        vals = _ints_in_str(parameters["tempRead"])
-        if len(vals) != pops:
-            raise ValueError(f"randomSample==1: 'tempRead' must have {pops} integers, got {len(vals)}.")
-        return [parameters["tempRead"]]
+        totals = []
+        for key in pop_keys:
+            if key not in parameters:
+                raise ValueError(f"RandomSample==1: missing '{key}' sample count.")
+            vals = _ints_in_str(parameters[key])
+            if len(vals) != 1:
+                raise ValueError(f"RandomSample==1: '{key}' must have exactly 1 integer, got {len(vals)}.")
+            totals.append(str(vals[0]))
+        return [" ".join(totals)]
 
     # random_flag == "0"
     per_pop = []
-    # pop0 comes from tempRead
-    vals0 = _ints_in_str(parameters.get("tempRead", ""))
-    if len(vals0) != 2:
-        raise ValueError(f"randomSample==0: pop0 string 'tempRead' must have exactly 2 integers, got {len(vals0)}.")
-    per_pop.append(parameters["tempRead"])
-
-    # remaining pops from nCarriers, nCarriers1, nCarriers2, ...
-    carriers_keys = []
-    if pops > 1:
-        carriers_keys = ["nCarriers"] + [f"nCarriers{i}" for i in range(1, pops-1)]
-    for idx, key in enumerate(carriers_keys, start=1):
+    for key in pop_keys:
         if key not in parameters:
-            raise ValueError(f"randomSample==0: missing per-pop string for pop{idx}: '{key}'.")
+            raise ValueError(f"RandomSample==0: missing per-pop sample string '{key}'.")
         v = parameters[key]
         ints = _ints_in_str(v)
         if len(ints) != 2:
-            raise ValueError(f"randomSample==0: '{key}' for pop{idx} must have exactly 2 integers, got {len(ints)}.")
+            raise ValueError(f"RandomSample==0: '{key}' must have exactly 2 integers, got {len(ints)}.")
         per_pop.append(v)
 
     if len(per_pop) != pops:
-        raise ValueError(f"randomSample==0: expected {pops} per-pop strings, got {len(per_pop)}.")
+        raise ValueError(f"RandomSample==0: expected {pops} per-pop strings, got {len(per_pop)}.")
     return per_pop
 
 # ---------- Final assembly ----------
 # Base (fixed-order) arguments up to and including randomSample:
-base_keys_order = [
+base_keys_common = [
     "seed","nruns","kingman_coal","drift_sim","msOutput",
     "popSizeVec","inv_freq","speciation","demography","inv_age",
-    "migRate","BasesPerMorgan","invRange","fixedSNPs",
-    "randSNPs","snpPositions","randomSample",
+    "migRate","BasesPerMorgan",
 ]
+base_keys_order = base_keys_common + (
+    ["invRange","randomSample"]
+    if smc_flag == "1"
+    else ["randPhi","phi","invRange","fixedSNPs","randSNPs","snpPositions","randomSample"]
+)
 cpp_args_order_before_legacy_phi = [
     "seed","nruns","kingman_coal","drift_sim","msOutput",
     "popSizeVec","inv_freq","speciation","demography","inv_age",
     "migRate","BasesPerMorgan",
 ]
-cpp_args_order_after_legacy_phi = [
-    "invRange","fixedSNPs","randSNPs","snpPositions","randomSample",
-]
-
 # Build the tail according to randomSample rule
 pops = _count_pops_from_graph(graph)
 random_flag = parameters.get("randomSample","0").strip()
 per_pop_strings = _collect_per_pop_strings(parameters, pops, random_flag)
 
 # Compose final argv list
-legacy_phi_args = ["0", "0"]
+legacy_phi_args = ["0", "0"] if smc_flag == "1" else [parameters["randPhi"], parameters["phi"]]
+legacy_snp_args = (
+    ["1 1 1e-6", "0", "0"]
+    if smc_flag == "1"
+    else [parameters["fixedSNPs"], parameters["randSNPs"], parameters["snpPositions"]]
+)
 args_list = (
     [parameters[k] for k in cpp_args_order_before_legacy_phi] +
     legacy_phi_args +
-    [parameters[k] for k in cpp_args_order_after_legacy_phi] +
+    [parameters["invRange"]] +
+    legacy_snp_args +
+    [parameters["randomSample"]] +
     per_pop_strings
 )
 if smc_flag == "1":
     args_list += [parameters["verbose"], parameters["target_snp"], parameters["gc"], parameters["dr"]]
-
-print("\nFinal parameters being passed:")
-for k in base_keys_order:
-    print(f"{k}: {parameters[k]}")
-    
-# Print the tail clearly
-if random_flag == "1":
-    print(f"tempRead: {parameters['tempRead']}")
-else:
-    print(f"tempRead (pop0): {parameters['tempRead']}")
-    for i in range(1, pops):
-        key = "nCarriers" if i == 1 else f"nCarriers{i-1}"
-        print(f"{key} (pop{i}): {parameters[key]}")
-if smc_flag == "1":
-    print(f"verbose: {parameters['verbose']}")
-    print(f"target_snp: {parameters['target_snp']}")
-    print(f"gc: {parameters['gc']}")
-    print(f"dr: {parameters['dr']}")
 
 try:
     proc = subprocess.Popen(
@@ -534,15 +581,15 @@ except FileNotFoundError:
     print(f"\nERROR: Executable not found at {EXECUTABLE}", file=sys.stderr)
     sys.exit(1)
 
-print("\nC++ Program Output:\n")
+print("\n\n-------------------Given parameters:-------------------\n")
 stderr_lines = []
 while True:
-    line = proc.stderr.readline()
-    if line == "" and proc.poll() is not None:
+    ch = proc.stderr.read(1)
+    if ch == "" and proc.poll() is not None:
         break
-    if line:
-        print(line, end="")
-        stderr_lines.append(line)
+    if ch:
+        print(ch, end="", flush=True)
+        stderr_lines.append(ch)
 
 if proc.returncode != 0:
     print(f"\nExecutable exited with code {proc.returncode}", file=sys.stderr)

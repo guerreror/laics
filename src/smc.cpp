@@ -225,6 +225,30 @@ static std::string formatCoordForFilename(double x)
     return out;
 }
 
+static void printProgress(int completed, int total, int& lastBucket)
+{
+    if (total <= 0) return;
+    int bucket = (completed >= total) ? 10 : static_cast<int>((static_cast<long long>(completed) * 10) / total);
+    if (bucket == lastBucket) return;
+    lastBucket = bucket;
+
+    const int width = 40;
+    const double frac = static_cast<double>(completed) / static_cast<double>(total);
+    int filled = static_cast<int>(frac * width);
+    if (filled > width) filled = width;
+
+    std::cerr << "\rProgress: [";
+    for (int i = 0; i < width; ++i) {
+        std::cerr << (i < filled ? '#' : '-');
+    }
+    std::cerr << "] " << static_cast<int>(frac * 100.0)
+              << "% (" << completed << "/" << total << " replicates)";
+    if (completed >= total) {
+        std::cerr << "\n";
+    }
+    std::cerr.flush();
+}
+
 int main(int argc, const char *argv[])
 {
     std::cerr << "Random Seed: " << seed << '\n';
@@ -250,6 +274,10 @@ int main(int argc, const char *argv[])
     unsigned int nSites = params.paramData->n_SNPs;
     const bool targetMode = !params.paramData->targetSNPs.empty();
     const bool writeAllDiagnostics = !targetMode && params.paramData->smcVerbose;
+
+    std::cerr << "\n\n";
+    int progressBucket = -1;
+    printProgress(0, static_cast<int>(nRuns), progressBucket);
 
     const std::string mig_json = "src/migration_matrices.json";
     auto schedule = readMigrationSchedule(mig_json);
@@ -594,6 +622,7 @@ int main(int argc, const char *argv[])
         }
 
         delete world;
+        printProgress(timer + 1, static_cast<int>(nRuns), progressBucket);
     }
 
     end = std::chrono::system_clock::now();
