@@ -3,8 +3,17 @@
 
 #include <string>
 #include <memory>
+#include <vector>
 #include "argnode.h"
+#include "parameters.h"
 #include "treemod.h"
+
+struct SMCActiveState {
+    std::vector<unsigned int> popSizes;
+    std::vector<double> invFreqs;
+};
+
+SMCActiveState activeStateAtTime_SMC(const Parameters::ParameterData& params, double t);
 
 // Writes a visualization-only collapsed tree:
 // unary chains are contracted, while coalescent/branching nodes and leaves remain.

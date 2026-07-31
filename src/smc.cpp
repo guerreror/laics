@@ -137,8 +137,7 @@ static bool pickWeightedEdge(const vector<EdgeWeight>& standard_edges,
 
 static void collectEdgeWeightsFromTree(
     TreeNode* node,
-    const vector<unsigned int>& pop_sizes,
-    const vector<double>& inv_freqs,
+    const Parameters::ParameterData& params,
     double r,
     vector<EdgeWeight>& standard_edges,
     vector<EdgeWeight>& inverted_edges)
@@ -157,9 +156,10 @@ static void collectEdgeWeightsFromTree(
             branchingAncestor && branchingAncestor->children.size() > 1;
 
         const unsigned int pop = child->context.pop;
-        if (leavesRetainedTree && pop < pop_sizes.size() && pop < inv_freqs.size()) {
-            const double popN = pop_sizes[pop];
-            const double pI = inv_freqs[pop];
+        const SMCActiveState state = activeStateAtTime_SMC(params, child->time);
+        if (leavesRetainedTree && pop < state.popSizes.size() && pop < state.invFreqs.size()) {
+            const double popN = state.popSizes[pop];
+            const double pI = state.invFreqs[pop];
             const double branchL = node->time - child->time;
             if (branchL > 0.0) {
                 const double base = 2.0 * r * popN * branchL;
@@ -170,7 +170,7 @@ static void collectEdgeWeightsFromTree(
                 }
             }
         }
-        collectEdgeWeightsFromTree(child, pop_sizes, inv_freqs, r, standard_edges, inverted_edges);
+        collectEdgeWeightsFromTree(child, params, r, standard_edges, inverted_edges);
     }
 }
 
@@ -380,8 +380,7 @@ int main(int argc, const char *argv[])
             vector<EdgeWeight> standard_edges;
             vector<EdgeWeight> inverted_edges;
             collectEdgeWeightsFromTree(activeTree,
-                                       params.paramData->popSizeVec,
-                                       params.paramData->initialFreqs,
+                                       *params.paramData,
                                        r,
                                        standard_edges,
                                        inverted_edges);

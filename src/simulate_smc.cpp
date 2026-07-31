@@ -17,6 +17,7 @@
 #include "argnode.h"
 #include "chromosome.h"
 #include "ran_mk.h"
+#include "smc_helpers.h"
 #include "world.h"
 
 using boost::math::binomial_coefficient;
@@ -26,6 +27,7 @@ using std::vector;
 static const double SMC_DEBUG_MIGRATION_BOOST = 1.0;
 
 static double triangleHeightAtX_SMC(double x, const Segment& range, double peakHeight);
+static bool canCoalesceByContext_SMC(const TreeNode* a, const TreeNode* b);
 
 static void recordEventRow_SMC(SMCStepOutcome* outcome,
                                std::ofstream& evlog,
@@ -78,22 +80,40 @@ static double computeTotalM_SMC(TreeNode* cutRoot,
     return b_mig_total;
 }
 
-static double computeTotalC_SMC(const Parameters::ParameterData& params) {
-    if (params.totalPopSize == 0) return 0.0;
-    return 1.0 / static_cast<double>(params.totalPopSize);
+static double computeTotalC_SMC(const Parameters::ParameterData& params,
+                                double t,
+                                unsigned int pop) {
+    const SMCActiveState state = activeStateAtTime_SMC(params, t);
+    if (pop >= state.popSizes.size() || state.popSizes[pop] == 0) return 0.0;
+    return 1.0 / static_cast<double>(state.popSizes[pop]);
+}
+
+static double computeTotalCForLineages_SMC(const std::vector<TreeNode*>& lineages,
+                                           const Parameters::ParameterData& params,
+                                           double t) {
+    double totalC = 0.0;
+    for (size_t i = 0; i < lineages.size(); ++i) {
+        for (size_t j = i + 1; j < lineages.size(); ++j) {
+            if (!canCoalesceByContext_SMC(lineages[i], lineages[j])) continue;
+            totalC += computeTotalC_SMC(params, t, lineages[i]->context.pop);
+        }
+    }
+    return totalC;
 }
 
 static double computeTotalG_SMC(const TreeNode* cutRoot,
                                 const Parameters::ParameterData& params,
+                                double t,
                                 double currentHopX) {
     if (!cutRoot) return 0.0;
     const unsigned int pop = cutRoot->context.pop;
-    if (pop >= params.initialFreqs.size()) return 0.0;
+    const SMCActiveState state = activeStateAtTime_SMC(params, t);
+    if (pop >= state.invFreqs.size()) return 0.0;
 
     const double localPhi =
         std::max(0.0, params.gcRate) +
         triangleHeightAtX_SMC(currentHopX, params.smcRange, std::max(0.0, params.drRate));
-    const double invFreq = params.initialFreqs[pop];
+    const double invFreq = state.invFreqs[pop];
     const double stdFreq = 1.0 - invFreq;
     if (cutRoot->context.inversion == 0) {
         return localPhi * invFreq;
@@ -294,11 +314,11 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
         double totalG = 0.0;
         for (size_t i = 0; i < lineages.size(); ++i) {
             totalM_i[i] = computeTotalM_SMC(lineages[i], params, mig_prob) * SMC_DEBUG_MIGRATION_BOOST;
-            totalG_i[i] = computeTotalG_SMC(lineages[i], params, currentHopX);
+            totalG_i[i] = computeTotalG_SMC(lineages[i], params, currentTime, currentHopX);
             totalM += totalM_i[i];
             totalG += totalG_i[i];
         }
-        const double totalC = computeTotalC_SMC(params);
+        const double totalC = computeTotalCForLineages_SMC(lineages, params, currentTime);
         const double Rate = totalC + totalM + totalG;
         if (Rate <= 0.0) {
             std::cerr << "SMC fallback failed: total event rate is zero.\n";
@@ -456,8 +476,8 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
         SMCEpochs_SMC epochs = buildEpochBreaks_SMC(mainRoot, lineageTime);
 
         double totalM = computeTotalM_SMC(cutRoot, params, mig_prob) * SMC_DEBUG_MIGRATION_BOOST;
-        double totalC = computeTotalC_SMC(params);
-        double totalG = computeTotalG_SMC(cutRoot, params, currentHopX);
+        double totalC = computeTotalC_SMC(params, lineageTime, cutRoot->context.pop);
+        double totalG = computeTotalG_SMC(cutRoot, params, lineageTime, currentHopX);
         double Rate = totalM + totalC + totalG;
         if (Rate <= 0.0) {
             std::cerr << "SMC reattachment failed: total event rate is zero.\n";
