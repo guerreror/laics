@@ -1,0 +1,20 @@
+Seed: "0"
+NumberOfReplicates: "100"
+KingmanCoal: "1"
+DriftSimulation: "0"
+MSOutput: "1"
+InversionFrequency: "0 0"
+InversionAge: "10000"
+BasesPerMorgan: "1e8"
+InversionRange: "0 100000"
+RandomSample: "0"
+Samples:
+  pop0: "2 0"
+  pop1: "2 0"
+AncestorFrequencies:
+  root: 0.2
+SMC: "1"
+Verbose: "0"
+TargetSNPs: ""
+GeneConversionRate: "0.00001"
+DoubleRecombinationRate: "0.00001"

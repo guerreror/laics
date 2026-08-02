@@ -12,11 +12,12 @@ InvLaBP simulates coalescent histories for sequences within a polymorphic chromo
     brew install boost yaml-cpp python
     python -m pip install demes numpy pyyaml
 
-    # 2) Generate migration matrices from your demes graph
-    python src/mig_matrix_demes.py  # Outputs the migration_matrices.json file
+    # 2) Edit demes.yaml
+    #    param.py automatically writes src/migration_matrices.json from demes.yaml
 
     # 3) Edit simulation parameters
-    #    - parameters.yaml (points to migration_matrices.json and sets all sim knobs)
+    #    - src/parameters_smc.yaml for SMC
+    #    - src/parameters_arg.yaml for ARG
 
     # 4) Build (from src/)
     g++ -std=c++14 -O3 \
@@ -31,13 +32,14 @@ InvLaBP simulates coalescent histories for sequences within a polymorphic chromo
     # 5) Place the executable inside the executables folder
 
     # 6) Run (from repo root)
-    python src/param.py
+    make run      # SMC
+    make run-arg  # ARG
 
 ---
 
 ## Newly Added Features
 
-- YAML-driven configuration (`parameters.yaml`)
+- YAML-driven configuration (`src/parameters_smc.yaml`, `src/parameters_arg.yaml`)
 - Demes-aware, time-varying migration via `demes.yaml` → `migration_matrices.json`
 - Multiple speciation merges and demography changes on explicit schedules
 - Python launcher (`src/param.py`) that parses configs, prints summaries, and can emit ms-style data
@@ -79,74 +81,91 @@ Run (standard workflow):
 1. **Edit `demes.yaml`**  
    Define populations, sizes, epochs, and migrations.
 
-2. **Generate migration matrices using the provided `demes.yaml` file**
+2. **Let `param.py` generate migration matrices**
 
-       python src/mig_matrix_demes.py
+   `param.py` automatically reads `demes.yaml` and writes `src/migration_matrices.json`.
 
-   This produces a time-stamped `migration_matrices.json` which is used by the simulation software.
-
-3. **Edit `parameters.yaml` accordingly**  
-   Make sure it points to `migration_matrices.json` and sets all simulation parameters.
+3. **Edit the parameter YAML accordingly**  
+   Use `src/parameters_smc.yaml` for SMC or `src/parameters_arg.yaml` for ARG.
 
 4. **Run the Python launcher from the root folder**
 
-       python src/param.py
+       python src/param.py --config src/parameters_smc.yaml
+
+   Or use:
+
+       make run
+       make run-arg
 
 ---
 
-## Configuration (Key Fields in `parameters.yaml` File)
+## Configuration
 
-All knobs live in `parameters.yaml`. Names map directly to internal parameters.
+SMC knobs live in `src/parameters_smc.yaml`; ARG knobs live in `src/parameters_arg.yaml`.
 
-- `seed`: RNG seed (`0` = random; the effective seed is printed)
-- `nruns`: number of replicates of the simulation
+- `Seed`: RNG seed (`0` = random; the effective seed is printed)
+- `NumberOfReplicates`: number of simulation replicates
 
-- `kingman_coal`:
+- `KingmanCoal`:
   - `1` = event-driven Kingman approximation
   - `0` = generation-by-generation
 
-- `drift_sim`:
+- `DriftSimulation`:
   - (Drift simulation mode; see code / `param.py` for details)
 
-- `msOutput`:  
+- `MSOutput`:  
   `1` to emit `outLABP*.sites` and `outLABP*.stats`
 
-- `inv_freq`:  
+- `InversionFrequency`:  
   Initial inversion frequency per population
 
-- `inv_age`:  
+- `InversionAge`:  
   If `> 0`, step the inversion to loss outside origin context at that time
 
 - `BasesPerMorgan`:
   - Bases per Morgan (scaling from physical bp to recombination units)
 
-- `randPhi`:
-  - `1` to sample `log10(phi)` uniformly in `phi_range = [min, max]`
-  - `0` to use fixed `phi`
+- `RandPhi`:
+  - ARG only. `1` to sample `log10(Phi)` uniformly in a range.
+  - `0` to use fixed `Phi`
 
-- `phi`:  
-  Fixed gene-flux when `randPhi = 0`
+- `Phi`:  
+  ARG fixed gene-flux when `RandPhi = 0`
 
-- `invRange`:  
+- `InversionRange`:  
   Inversion span in bp (scaled internally)
 
   ```yaml
-  invRange: [L_bp, R_bp]
-- `fixedS`:
-  `fixedS = 1` → exactly `n_SNPs` markers
+  InversionRange: "L_bp R_bp"
+  ```
 
-- `n_SNPs`: 
-  Number of site node positions.
+- `FixedSNPs`:
+  ARG only. `FixedSNPs = 1 ...` means exactly fixed marker count.
 
-- `randSNP`:
-  `1` → uniform placement in `[snpPositions[0], snpPositions[-1]]`
+- `RandomSNPs`:
+  ARG only. `1` means random marker placement.
 
-- `snpPositions`:  
+- `SiteNodePositions`:  
   Site positions in bp.
 
-- `randomSample`: 
-  `1` → one per-pop total sample; carriers drawn binomially by `inv_freq`  
+- `RandomSample`: 
+  `1` → one per-pop total sample; carriers drawn binomially by `InversionFrequency`  
   `0` → one pair per pop: `<standard> <inverted>` (exact)
 
-- `nCarriers / tempRead`: 
-  As printed by the summary from `src/param.py`.
+- `Samples`: 
+  Per-pop sample definitions.
+
+  ```yaml
+  Samples:
+    pop0: "2 0"
+    pop1: "2 0"
+  ```
+
+- `TargetSNPs`:
+  SMC only. Emit diagnostics for selected horizontal positions.
+
+- `GeneConversionRate`:
+  SMC local GC rectangle height.
+
+- `DoubleRecombinationRate`:
+  SMC DR triangle peak height.

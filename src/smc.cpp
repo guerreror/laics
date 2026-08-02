@@ -149,8 +149,7 @@ static bool pickWeightedEdge(const vector<EdgeWeight>& standard_edges,
 
 static void collectEdgeWeightsFromTree(
     TreeNode* node,
-    const vector<unsigned int>& pop_sizes,
-    const vector<double>& inv_freqs,
+    const Parameters::ParameterData& params,
     double r,
     vector<EdgeWeight>& standard_edges,
     vector<EdgeWeight>& inverted_edges)
@@ -169,9 +168,10 @@ static void collectEdgeWeightsFromTree(
             branchingAncestor && branchingAncestor->children.size() > 1;
 
         const unsigned int pop = child->context.pop;
-        if (leavesRetainedTree && pop < pop_sizes.size() && pop < inv_freqs.size()) {
-            const double popN = pop_sizes[pop];
-            const double pI = inv_freqs[pop];
+        const SMCActiveState state = activeStateAtTime_SMC(params, child->time);
+        if (leavesRetainedTree && pop < state.popSizes.size() && pop < state.invFreqs.size()) {
+            const double popN = state.popSizes[pop];
+            const double pI = state.invFreqs[pop];
             const double branchL = node->time - child->time;
             if (branchL > 0.0) {
                 const double base = r * branchL;
@@ -182,7 +182,7 @@ static void collectEdgeWeightsFromTree(
                 }
             }
         }
-        collectEdgeWeightsFromTree(child, pop_sizes, inv_freqs, r, standard_edges, inverted_edges);
+        collectEdgeWeightsFromTree(child, params, r, standard_edges, inverted_edges);
     }
 }
 
@@ -372,6 +372,30 @@ static void appendTreeShapeRow(const string& path,
         << stats.inverted_branch_length << "\n";
 }
 
+static void printProgress(int completed, int total, int& lastBucket)
+{
+    if (total <= 0) return;
+    int bucket = (completed >= total) ? 10 : static_cast<int>((static_cast<long long>(completed) * 10) / total);
+    if (bucket == lastBucket) return;
+    lastBucket = bucket;
+
+    const int width = 40;
+    const double frac = static_cast<double>(completed) / static_cast<double>(total);
+    int filled = static_cast<int>(frac * width);
+    if (filled > width) filled = width;
+
+    std::cerr << "\rProgress: [";
+    for (int i = 0; i < width; ++i) {
+        std::cerr << (i < filled ? '#' : '-');
+    }
+    std::cerr << "] " << static_cast<int>(frac * 100.0)
+              << "% (" << completed << "/" << total << " replicates)";
+    if (completed >= total) {
+        std::cerr << "\n";
+    }
+    std::cerr.flush();
+}
+
 int main(int argc, const char *argv[])
 {
     std::cerr << "Random Seed: " << seed << '\n';
@@ -407,6 +431,10 @@ int main(int argc, const char *argv[])
     const bool writeAllDiagnostics = !targetMode && params.paramData->smcVerbose;
     const string tree_shape_path = pathJoin(output_dir, "smc_tree_shape.csv");
     bool treeShapeHeaderWritten = false;
+
+    std::cerr << "\n\n";
+    int progressBucket = -1;
+    printProgress(0, static_cast<int>(nRuns), progressBucket);
 
     const std::string mig_json = "src/migration_matrices.json";
     auto schedule = readMigrationSchedule(mig_json);
@@ -541,8 +569,7 @@ int main(int argc, const char *argv[])
             vector<EdgeWeight> standard_edges;
             vector<EdgeWeight> inverted_edges;
             collectEdgeWeightsFromTree(activeTree,
-                                       params.paramData->popSizeVec,
-                                       params.paramData->initialFreqs,
+                                       *params.paramData,
                                        r,
                                        standard_edges,
                                        inverted_edges);
@@ -796,6 +823,7 @@ int main(int argc, const char *argv[])
         }
 
         delete world;
+        printProgress(timer + 1, static_cast<int>(nRuns), progressBucket);
     }
 
     end = std::chrono::system_clock::now();
