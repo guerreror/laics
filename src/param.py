@@ -592,12 +592,10 @@ print(f"output_dir: {output_dir}")
     
 # Print the tail clearly
 if random_flag == "1":
-    print(f"tempRead: {parameters['tempRead']}")
+    print(f"random sample totals: {per_pop_strings[0]}")
 else:
-    print(f"tempRead (pop0): {parameters['tempRead']}")
-    for i in range(1, pops):
-        key = "nCarriers" if i == 1 else f"nCarriers{i-1}"
-        print(f"{key} (pop{i}): {parameters[key]}")
+    for i, sample_string in enumerate(per_pop_strings):
+        print(f"samples (pop{i}): {sample_string}")
 if smc_flag == "1":
     print(f"verbose: {parameters['verbose']}")
     print(f"target_snp: {parameters['target_snp']}")
@@ -617,14 +615,14 @@ except FileNotFoundError:
     sys.exit(1)
 
 print("\n\n-------------------Given parameters:-------------------\n")
-stderr_lines = []
+output_lines = []
 while True:
-    ch = proc.stderr.read(1)
+    ch = proc.stdout.read(1)
     if ch == "" and proc.poll() is not None:
         break
     if ch:
         print(ch, end="", flush=True)
-        stderr_lines.append(ch)
+        output_lines.append(ch)
 
 if proc.returncode != 0:
     print(f"\nExecutable exited with code {proc.returncode}", file=sys.stderr)
