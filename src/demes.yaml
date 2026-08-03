@@ -27,14 +27,12 @@ demes:
         end_time: 10000
 
   - name: pop0
-    start_time: 10000
     ancestors: [root]
     epochs:
       - start_size: 87000
         end_time: 0
 
   - name: pop1
-    start_time: 10000
     ancestors: [root]
     epochs:
       - start_size: 6666
@@ -42,79 +40,4 @@ demes:
 
 migrations:
   - demes: [pop0, pop1]
-    rate: 0
-
-
-
-
-
-# description: two-pop split with ancestral bottleneck
-# time_units: generations
-
-# demes:
-#   - name: root
-#     epochs:
-#       - end_time: 20000
-#         start_size: 10000
-#       - end_time: 10000
-#         start_size: 1000
-
-#   - name: pop0
-#     start_time: 10000
-#     ancestors: [root]
-#     epochs:
-#       - end_time: 0
-#         start_size: 10000
-
-#   - name: pop1
-#     start_time: 10000
-#     ancestors: [root]
-#     epochs:
-#       - end_time: 0
-#         start_size: 10000
-
-
-
-# # description: single population bottleneck
-# time_units: generations
-
-# demes:
-#   - name: pop0
-#     epochs:
-#       - end_time: 10000
-#         start_size: 10000
-#       - end_time: 1000
-#         start_size: 1000
-#       - end_time: 0
-#         start_size: 10000
-
-      
-
-
-# description: two pops of size 10000 split from a single ancestor at 10000 generations
-# time_units: generations
-
-# demes:
-#   # Ancestral deme
-#   - name: root
-#     epochs:
-#       - start_size: 10000
-#         end_time: 10000    
-
-#   - name: pop0
-#     start_time: 10000
-#     ancestors: [root]
-#     epochs:
-#       - start_size: 10000
-#         end_time: 0
-
-#   - name: pop1
-#     start_time: 10000
-#     ancestors: [root]
-#     epochs:
-#       - start_size: 10000
-#         end_time: 0
-
-# migrations:
-#   - demes: [pop0, pop1]
-#     rate: 0.005
+    rate: 0.0
