@@ -36,23 +36,21 @@ demes:
   # Ancestral deme
   - name: root
     epochs:
-      - start_size: 10000
+      - start_size: 8888
         end_time: 10000
 
   - name: pop0
-    start_time: 10000
     ancestors: [root]
     epochs:
-      - start_size: 10000
+      - start_size: 87000
         end_time: 0
 
   - name: pop1
-    start_time: 10000
     ancestors: [root]
     epochs:
-      - start_size: 10000
+      - start_size: 6666
         end_time: 0
 
 migrations:
   - demes: [pop0, pop1]
-    rate: 0.0001
+    rate: 0.0
