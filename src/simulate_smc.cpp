@@ -408,7 +408,7 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
             totalG += totalG_i[i];
         }
         const double totalC = computeTotalCForLineages_SMC(lineages, params, currentTime);
-        
+
         // Count compatible free-lineage pairs
         size_t compatiblePairCount = 0;
         for (size_t i = 0; i < lineages.size(); ++i) {
@@ -607,21 +607,27 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
 
         SMCEpochs_SMC epochs = buildEpochBreaks_SMC(mainRoot, lineageTime);
 
-        // Count retained-tree targets for comparison
-        std::vector<ReattachCandidate_SMC> diagnosticCandidates;
+        // Each compatible retained-tree branch contributes one pairwise rate.
+        std::vector<ReattachCandidate_SMC> eligibleTargets;
         collectReattachCandidates_SMC(mainRoot, lineageTime, cutRoot->context,
-                                      params, diagnosticCandidates);
+                                      params, eligibleTargets);
 
         double totalM = computeTotalM_SMC(cutRoot, params, mig_prob) * SMC_DEBUG_MIGRATION_BOOST;
-        double totalC = computeTotalC_SMC(params, lineageTime, cutRoot->context.pop);
+
+        // pairRate is the coalescence rate for a single compatible pair of lineages in the same context
+        double pairRate = computeTotalC_SMC(params, lineageTime, cutRoot->context.pop);
+        // totalC is the sum of pairwise coalescence rates for all eligible targets, 
+        // which is equal to the number of eligible targets multiplied by the pairwise rate for the cutRoot's context.
+        double totalC = static_cast<double>(eligibleTargets.size()) * pairRate;
+
         double totalG = computeTotalG_SMC(cutRoot, params, lineageTime, currentHopX);
         
         // record the below-root coalescence rate and other diagnostic info for this hop
         recordCoalescenceRow_SMC(outcome, hopIndex, currentHopX, "below_root",
                                  lineageTime, cutRoot->context, params,
-                                 1 + diagnosticCandidates.size(),
-                                 diagnosticCandidates.size(),
-                                 totalC, totalC, totalM, totalG);
+                                 1 + eligibleTargets.size(),
+                                 eligibleTargets.size(),
+                                 pairRate, totalC, totalM, totalG);
         double Rate = totalM + totalC + totalG;
         if (Rate <= 0.0) {
             double nextEpoch = 0.0;

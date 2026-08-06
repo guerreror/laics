@@ -23,7 +23,6 @@ struct SMCStepOutcome {
     double stopTime = 0.0;
     std::vector<GeneFluxEvent_SMC> geneFluxEvents;
     std::vector<std::string> eventRows;
-    // Rows describing the coalescence rates used during this SMC step.
     std::vector<std::string> coalescenceRows;
 };
 
