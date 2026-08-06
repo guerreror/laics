@@ -430,7 +430,19 @@ int main(int argc, const char *argv[])
     const bool targetMode = !params.paramData->targetSNPs.empty();
     const bool writeAllDiagnostics = !targetMode && params.paramData->smcVerbose;
     const string tree_shape_path = pathJoin(output_dir, "smc_tree_shape.csv");
+    const string coalescence_diagnostic_path =
+        pathJoin(output_dir, "smc_coalescence_diagnostics.csv");
     bool treeShapeHeaderWritten = false;
+
+    {
+        std::ofstream coalescenceDiagnostics(coalescence_diagnostic_path);
+        if (coalescenceDiagnostics.is_open()) {
+            coalescenceDiagnostics
+                << "run,hop,current_x,phase,lineage_time,population,arrangement,"
+                << "population_size,arrangement_frequency,context_size,lineage_count,"
+                << "eligible_pair_count,pair_rate_used,total_c_used,total_m,total_g\n";
+        }
+    }
 
     std::cerr << "\n\n";
     int progressBucket = -1;
@@ -628,6 +640,17 @@ int main(int argc, const char *argv[])
                                             hop,
                                             &outcome,
                                             writeAllDiagnostics ? pathJoin(output_dir, "smc_hop_events.csv") : "");
+
+            // Append every vertical rate calc during this hop
+            if (!outcome.coalescenceRows.empty()) {
+                std::ofstream coalescenceDiagnostics(
+                    coalescence_diagnostic_path, std::ios::app);
+                if (coalescenceDiagnostics.is_open()) {
+                    for (const auto& row : outcome.coalescenceRows) {
+                        coalescenceDiagnostics << timer << "," << row;
+                    }
+                }
+            }
 
             for (const auto& evt : outcome.geneFluxEvents) {
                 geneFluxActive.push_back(evt);

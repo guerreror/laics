@@ -88,6 +88,43 @@ static double computeTotalC_SMC(const Parameters::ParameterData& params,
     return 1.0 / static_cast<double>(state.popSizes[pop]);
 }
 
+static void recordCoalescenceRow_SMC(
+    SMCStepOutcome* outcome,
+    int hopIndex,
+    double currentHopX,
+    const std::string& phase,
+    double lineageTime,
+    const Context& context,
+    const Parameters::ParameterData& params,
+    size_t lineageCount,
+    size_t eligiblePairCount,
+    double pairRateUsed,
+    double totalCUsed,
+    double totalM,
+    double totalG) {
+    if (!outcome) return;
+
+    // Compute the current effective population size and arrangement frequency for current context
+    const SMCActiveState state = activeStateAtTime_SMC(params, lineageTime);
+    double populationSize = 0.0;
+    double arrangementFrequency = 0.0;
+    if (context.pop < state.popSizes.size() && context.pop < state.invFreqs.size()) {
+        populationSize = static_cast<double>(state.popSizes[context.pop]);
+        arrangementFrequency = context.inversion == 1
+            ? state.invFreqs[context.pop]
+            : 1.0 - state.invFreqs[context.pop];
+    }
+    const double contextSize = populationSize * arrangementFrequency;
+
+    std::ostringstream row;
+    row << hopIndex << "," << currentHopX << "," << phase << "," << lineageTime << ","
+        << context.pop << "," << context.inversion << ","
+        << populationSize << "," << arrangementFrequency << "," << contextSize << ","
+        << lineageCount << "," << eligiblePairCount << ","
+        << pairRateUsed << "," << totalCUsed << "," << totalM << "," << totalG << "\n";
+    outcome->coalescenceRows.push_back(row.str());
+}
+
 static double computeTotalCForLineages_SMC(const std::vector<TreeNode*>& lineages,
                                            const Parameters::ParameterData& params,
                                            double t) {
@@ -371,6 +408,28 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
             totalG += totalG_i[i];
         }
         const double totalC = computeTotalCForLineages_SMC(lineages, params, currentTime);
+        
+        // Count compatible free-lineage pairs
+        size_t compatiblePairCount = 0;
+        for (size_t i = 0; i < lineages.size(); ++i) {
+            for (size_t j = i + 1; j < lineages.size(); ++j) {
+                if (canCoalesceByContext_SMC(lineages[i], lineages[j])) {
+                    ++compatiblePairCount;
+                }
+            }
+        }
+
+        const Context diagnosticContext = lineages.front()->context;
+        // Compute the total coalescence rate for the current context
+        // they may differ from the sum of pairwise rates if there are multiple lineages in the same context
+        const double pairRateUsed = computeTotalC_SMC(
+            params, currentTime, diagnosticContext.pop);
+        // call the diag function to record the current state of the sim
+        recordCoalescenceRow_SMC(outcome, hopIndex, currentHopX, "above_root",
+                                 currentTime, diagnosticContext, params,
+                                 lineages.size(), compatiblePairCount,
+                                 pairRateUsed, totalC, totalM, totalG);
+
         const double Rate = totalC + totalM + totalG;
         if (Rate <= 0.0) {
             double nextEpoch = 0.0;
@@ -548,9 +607,21 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
 
         SMCEpochs_SMC epochs = buildEpochBreaks_SMC(mainRoot, lineageTime);
 
+        // Count retained-tree targets for comparison
+        std::vector<ReattachCandidate_SMC> diagnosticCandidates;
+        collectReattachCandidates_SMC(mainRoot, lineageTime, cutRoot->context,
+                                      params, diagnosticCandidates);
+
         double totalM = computeTotalM_SMC(cutRoot, params, mig_prob) * SMC_DEBUG_MIGRATION_BOOST;
         double totalC = computeTotalC_SMC(params, lineageTime, cutRoot->context.pop);
         double totalG = computeTotalG_SMC(cutRoot, params, lineageTime, currentHopX);
+        
+        // record the below-root coalescence rate and other diagnostic info for this hop
+        recordCoalescenceRow_SMC(outcome, hopIndex, currentHopX, "below_root",
+                                 lineageTime, cutRoot->context, params,
+                                 1 + diagnosticCandidates.size(),
+                                 diagnosticCandidates.size(),
+                                 totalC, totalC, totalM, totalG);
         double Rate = totalM + totalC + totalG;
         if (Rate <= 0.0) {
             double nextEpoch = 0.0;
