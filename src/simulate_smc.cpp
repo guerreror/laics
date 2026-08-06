@@ -82,10 +82,24 @@ static double computeTotalM_SMC(TreeNode* cutRoot,
 
 static double computeTotalC_SMC(const Parameters::ParameterData& params,
                                 double t,
-                                unsigned int pop) {
+                                const Context& context) {
     const SMCActiveState state = activeStateAtTime_SMC(params, t);
-    if (pop >= state.popSizes.size() || state.popSizes[pop] == 0) return 0.0;
-    return 1.0 / static_cast<double>(state.popSizes[pop]);
+
+    // If the context's population index is out of bounds for the active state, return 0.0
+    if (context.pop >= state.popSizes.size() ||
+        context.pop >= state.invFreqs.size()) {
+        std::cerr << "Warning in computeTotalC_SMC(): population index ";
+        return 0.0;
+    }
+
+    // Compute the effective population size for the current context, considering inversion frequency
+    const double arrangementFrequency = context.inversion == 1
+        ? state.invFreqs[context.pop]
+        : 1.0 - state.invFreqs[context.pop];
+    const double contextSize =
+        static_cast<double>(state.popSizes[context.pop]) * arrangementFrequency;
+    if (contextSize <= 0.0) return 0.0;
+    return 1.0 / contextSize;
 }
 
 static void recordCoalescenceRow_SMC(
@@ -132,7 +146,7 @@ static double computeTotalCForLineages_SMC(const std::vector<TreeNode*>& lineage
     for (size_t i = 0; i < lineages.size(); ++i) {
         for (size_t j = i + 1; j < lineages.size(); ++j) {
             if (!canCoalesceByContext_SMC(lineages[i], lineages[j])) continue;
-            totalC += computeTotalC_SMC(params, t, lineages[i]->context.pop);
+            totalC += computeTotalC_SMC(params, t, lineages[i]->context);
         }
     }
     return totalC;
@@ -423,7 +437,7 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
         // Compute the total coalescence rate for the current context
         // they may differ from the sum of pairwise rates if there are multiple lineages in the same context
         const double pairRateUsed = computeTotalC_SMC(
-            params, currentTime, diagnosticContext.pop);
+            params, currentTime, diagnosticContext);
         // call the diag function to record the current state of the sim
         recordCoalescenceRow_SMC(outcome, hopIndex, currentHopX, "above_root",
                                  currentTime, diagnosticContext, params,
@@ -615,7 +629,7 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
         double totalM = computeTotalM_SMC(cutRoot, params, mig_prob) * SMC_DEBUG_MIGRATION_BOOST;
 
         // pairRate is the coalescence rate for a single compatible pair of lineages in the same context
-        double pairRate = computeTotalC_SMC(params, lineageTime, cutRoot->context.pop);
+        double pairRate = computeTotalC_SMC(params, lineageTime, cutRoot->context);
         // totalC is the sum of pairwise coalescence rates for all eligible targets, 
         // which is equal to the number of eligible targets multiplied by the pairwise rate for the cutRoot's context.
         double totalC = static_cast<double>(eligibleTargets.size()) * pairRate;
