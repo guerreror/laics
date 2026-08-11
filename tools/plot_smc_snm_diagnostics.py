@@ -477,6 +477,97 @@ def plot_hop_locations(grouped, out_path, region_length=None, run_label=None):
     finish_figure(fig, out_path, run_label)
 
 
+def plot_migration_events_by_time(input_path, out_path, summary_path, split_time=None, run_label=None):
+    # Stream this file: a migration bug can produce millions of rows.
+    bin_width = nice_ceiling(split_time / 50.0) if split_time and split_time > 0.0 else 1000.0
+    total_by_bin = defaultdict(int)
+    changed_by_bin = defaultdict(int)
+    period_counts = {
+        "before_split": {"migration_channel_events": 0, "context_changes": 0},
+        "after_split": {"migration_channel_events": 0, "context_changes": 0},
+    }
+
+    with open(input_path, newline="") as handle:
+        for row in csv.DictReader(handle):
+            event_time = float(row["event_time"])
+            changed = int(row["context_changed"])
+            bin_index = max(0, int(event_time / bin_width))
+            total_by_bin[bin_index] += 1
+            changed_by_bin[bin_index] += changed
+            period = "before_split" if split_time is None or event_time < split_time else "after_split"
+            period_counts[period]["migration_channel_events"] += 1
+            period_counts[period]["context_changes"] += changed
+
+    with open(summary_path, "w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow([
+            "period", "migration_channel_events", "context_changes",
+            "self_transitions", "context_change_fraction",
+        ])
+        for period in ("before_split", "after_split"):
+            total = period_counts[period]["migration_channel_events"]
+            changed = period_counts[period]["context_changes"]
+            writer.writerow([
+                period,
+                total,
+                changed,
+                total - changed,
+                changed / total if total else float("nan"),
+            ])
+
+    if not total_by_bin:
+        return
+
+    bins = list(range(max(total_by_bin) + 1))
+    centers = [(index + 0.5) * bin_width for index in bins]
+    totals = [total_by_bin[index] for index in bins]
+    changes = [changed_by_bin[index] for index in bins]
+
+    fig, (ax_total, ax_changed) = plt.subplots(
+        2, 1, figsize=(7.2, 5.8), sharex=True,
+        gridspec_kw={"height_ratios": [1.35, 1.0], "hspace": 0.10},
+    )
+    add_run_label(fig, run_label)
+
+    ax_total.bar(centers, totals, width=bin_width, color="#3b6f8f", linewidth=0)
+    ax_total.set_ylabel("Migration-channel\nselections")
+    ax_total.set_yscale("log")
+    ax_total.spines["top"].set_visible(False)
+    ax_total.spines["right"].set_visible(False)
+
+    ax_changed.bar(centers, changes, width=bin_width, color="#b13b2e", linewidth=0)
+    ax_changed.set_ylabel("Population-changing\nevents")
+    ax_changed.set_yscale("log")
+    ax_changed.set_xlabel("Event time (generations ago)")
+    ax_changed.spines["top"].set_visible(False)
+    ax_changed.spines["right"].set_visible(False)
+
+    if split_time is not None:
+        for ax in (ax_total, ax_changed):
+            ax.axvline(
+                split_time,
+                color="#222222",
+                linestyle="--",
+                linewidth=1.4,
+                label=f"Population merger ({split_time:g})",
+            )
+        ax_total.legend(frameon=False, loc="upper right")
+        before = period_counts["before_split"]["migration_channel_events"]
+        after = period_counts["after_split"]["migration_channel_events"]
+        ax_total.text(
+            0.02,
+            0.95,
+            f"Before merger: {before:,}\nAfter merger: {after:,}",
+            transform=ax_total.transAxes,
+            ha="left",
+            va="top",
+            fontsize=9,
+            bbox={"boxstyle": "round,pad=0.35", "facecolor": "white", "edgecolor": "none", "alpha": 0.88},
+        )
+
+    finish_figure(fig, out_path, run_label)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_dir", help="SMC output directory containing smc_tree_shape.csv")
@@ -488,6 +579,7 @@ def main():
     parser.add_argument("--region-length", type=float, default=None, help="Region length in bp for fraction-traversed plots")
     parser.add_argument("--bin-size-bp", type=float, default=None, help="Optional fixed bp bin width for position-weighted plots; default chooses an adaptive width from region length")
     parser.add_argument("--run-label", default=None, help="Short context label/caption printed at the top of each plot")
+    parser.add_argument("--split-time", type=float, default=None, help="Population merger time in generations for migration-event diagnostics")
     args = parser.parse_args()
 
     run_dir = Path(args.run_dir)
@@ -516,6 +608,16 @@ def main():
     plot_unary_fraction_by_hop(rows, out_dir / f"{args.prefix}_unary_fraction_by_hop.png", run_label=args.run_label)
     plot_branch_length_composition(rows, out_dir / f"{args.prefix}_branch_length_composition_by_hop.png", run_label=args.run_label)
     plot_hop_locations(grouped, out_dir / f"{args.prefix}_hop_locations.png", region_length=args.region_length, run_label=args.run_label)
+
+    migration_input = run_dir / "smc_migration_diagnostics.csv"
+    if migration_input.exists():
+        plot_migration_events_by_time(
+            migration_input,
+            out_dir / f"{args.prefix}_migration_events_by_time.png",
+            out_dir / f"{args.prefix}_migration_events_by_time_summary.csv",
+            split_time=args.split_time,
+            run_label=args.run_label,
+        )
 
     print(f"Wrote SNM diagnostics to {out_dir}")
 

@@ -92,7 +92,7 @@ static double computeTotalC_SMC(const Parameters::ParameterData& params,
         return 0.0;
     }
 
-    // Compute the effective population size for the current context, considering inversion frequency
+    // if lineage is inverted, use invFreq, o.w use 1 - invFreq
     const double arrangementFrequency = context.inversion == 1
         ? state.invFreqs[context.pop]
         : 1.0 - state.invFreqs[context.pop];
@@ -122,14 +122,22 @@ static void recordCoalescenceRow_SMC(
     const SMCActiveState state = activeStateAtTime_SMC(params, lineageTime);
     double populationSize = 0.0;
     double arrangementFrequency = 0.0;
-    if (context.pop < state.popSizes.size() && context.pop < state.invFreqs.size()) {
-        populationSize = static_cast<double>(state.popSizes[context.pop]);
-        arrangementFrequency = context.inversion == 1
-            ? state.invFreqs[context.pop]
-            : 1.0 - state.invFreqs[context.pop];
+    // Reject an invalid population index before indexing the active-state vectors.
+    if (context.pop >= state.popSizes.size() ||
+        context.pop >= state.invFreqs.size()) {
+        std::cerr
+            << "Warning: invalid population index " << context.pop
+            << " at time " << lineageTime << '\n';
+        return;
     }
-    const double contextSize = populationSize * arrangementFrequency;
+    // Record the population size and frequency for the lineage's active context.
+    populationSize = static_cast<double>(state.popSizes[context.pop]);
+    arrangementFrequency = context.inversion == 1
+        ? state.invFreqs[context.pop]
+        : 1.0 - state.invFreqs[context.pop];
 
+    const double contextSize = populationSize * arrangementFrequency;
+    
     std::ostringstream row;
     row << hopIndex << "," << currentHopX << "," << phase << "," << lineageTime << ","
         << context.pop << "," << context.inversion << ","
@@ -338,7 +346,8 @@ static void collectReattachCandidates_SMC(TreeNode* node,
                                           std::vector<ReattachCandidate_SMC>& out) {
     if (!node) return;
     for (auto* ch : node->children) {
-        if (node->time >= t && ch->time <= t &&
+        // made "node -> time > t" upper bound exclusive, cant have both sides be inclusive, i think
+        if (node->time > t && ch->time <= t &&
             contextAfterEpochEvents_SMC(ch->context, params, t) == branchCtx) {
             out.push_back({node, ch});
         }
@@ -618,6 +627,24 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
     while (true) {
         unsigned long epochNextId = std::max(getMaxId(mainRoot), getMaxId(cutRoot)) + 1;
         applyEpochEventsToLineageAtTime_SMC(cutRoot, lineageTime, params, epochNextId);
+
+        // A cut lineage at or above the retained root must use the above-root process.
+        if (lineageTime >= root_time) {
+            if (resolveAboveRootByMiniSMC_SMC(mainRoot, cutRoot, lineageTime,
+                                              params, mig_prob, currentHopX,
+                                              outcome, evlog, hopIndex, root_time)) {
+                return true;
+            }
+            std::cerr << "SMC reattachment failed: above-root simulation did not coalesce.\n";
+            recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX,
+                               "above_root_fallback_failed", root_time);
+            if (outcome) {
+                outcome->coalesced = false;
+                outcome->hitRootLimit = true;
+                outcome->stopTime = root_time;
+            }
+            return false;
+        }
 
         SMCEpochs_SMC epochs = buildEpochBreaks_SMC(mainRoot, lineageTime);
 
