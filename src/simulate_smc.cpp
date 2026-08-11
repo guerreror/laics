@@ -137,7 +137,7 @@ static void recordCoalescenceRow_SMC(
         : 1.0 - state.invFreqs[context.pop];
 
     const double contextSize = populationSize * arrangementFrequency;
-    
+
     std::ostringstream row;
     row << hopIndex << "," << currentHopX << "," << phase << "," << lineageTime << ","
         << context.pop << "," << context.inversion << ","
@@ -314,6 +314,19 @@ static bool nextModelEpochAfter_SMC(const Parameters::ParameterData& params,
     if (!params.speciation.empty() && params.speciation[0] == 1) {
         for (size_t i = 1; i + 4 < params.speciation.size(); i += 5) {
             consider(params.speciation[i + 2]);
+        }
+    }
+
+    // Demographic events also change event rates, so waiting times
+    // must be restarted when the simulation reaches one.
+    if (!params.demography.empty() && params.demography[0] == 1) {
+        const size_t nPops = params.popSizeVec.size();
+        const size_t stride = 1 + nPops;
+
+        for (size_t i = 1;
+            i + nPops < params.demography.size();
+            i += stride) {
+            consider(params.demography[i]);
         }
     }
 
@@ -628,7 +641,7 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
         unsigned long epochNextId = std::max(getMaxId(mainRoot), getMaxId(cutRoot)) + 1;
         applyEpochEventsToLineageAtTime_SMC(cutRoot, lineageTime, params, epochNextId);
 
-        // A cut lineage at or above the retained root must use the above-root process.
+        // Error catch for: a cut lineage at or above the retained root must use the above-root process.
         if (lineageTime >= root_time) {
             if (resolveAboveRootByMiniSMC_SMC(mainRoot, cutRoot, lineageTime,
                                               params, mig_prob, currentHopX,
