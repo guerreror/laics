@@ -55,9 +55,34 @@ def select_snapshot(snapshots, run, target_x):
         raise ValueError(f"No snapshots found for run {run}.")
 
     eps = 1e-12
-    containing = [key for key in candidates if key[2] - eps <= target_x <= key[3] + eps]
+    exact = [key for key in candidates if abs(key[2] - target_x) <= eps and abs(key[3] - target_x) <= eps]
+    if exact:
+        return exact[0]
+
+    containing = [key for key in candidates if key[2] + eps < target_x < key[3] - eps]
     if containing:
-        return containing[0]
+        key = containing[0]
+        prev_key = None
+        for candidate in candidates:
+            if candidate[0] == run and candidate[1] == key[1] - 1:
+                prev_key = candidate
+                break
+        options = []
+        if prev_key is not None:
+            options.append((f"tree at x_start={key[2]} before hop {key[1]}", prev_key))
+        options.append((f"tree at x_end={key[3]} after hop {key[1]}", key))
+        print(f"x={target_x} falls inside hop {key[1]} interval: {key[2]} -> {key[3]}")
+        for i, (label, option_key) in enumerate(options, start=1):
+            print(f"{i}. {label} (stored hop={option_key[1]})")
+        choice = input(f"Choose 1-{len(options)}: ").strip()
+        idx = int(choice) - 1
+        if idx < 0 or idx >= len(options):
+            raise ValueError("Invalid choice.")
+        return options[idx][1]
+
+    boundary = [key for key in candidates if abs(key[2] - target_x) <= eps or abs(key[3] - target_x) <= eps]
+    if boundary:
+        return boundary[-1]
 
     lower = None
     higher = None

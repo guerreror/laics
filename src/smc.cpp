@@ -235,14 +235,13 @@ static void writeTreeSnapshotCSVRows(std::ofstream& out,
     }
 }
 
-static void appendTreeSnapshotCSV(const std::string& path,
+static void appendTreeSnapshotCSV(std::ofstream& out,
                                   TreeNode* tree,
                                   int run,
                                   int hop,
                                   double xStart,
                                   double xEnd)
 {
-    std::ofstream out(path.c_str(), std::ios::app);
     if (!out.is_open()) return;
     writeTreeSnapshotCSVRows(out, tree, run, hop, xStart, xEnd, -1);
 }
@@ -351,10 +350,10 @@ int main(int argc, const char *argv[])
         if (hop_events.is_open()) {
             hop_events << "run,hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
         }
-        std::ofstream snapshots("smc_tree_snapshots.csv");
-        if (snapshots.is_open()) {
-            snapshots << "run,hop,x_start,x_end,node_id,parent_id,time,pop,inversion\n";
-        }
+    }
+    std::ofstream treeSnapshots("smc_tree_snapshots.csv");
+    if (treeSnapshots.is_open()) {
+        treeSnapshots << "run,hop,x_start,x_end,node_id,parent_id,time,pop,inversion\n";
     }
 
     for (int timer = 0; timer < (int)nRuns; ++timer)
@@ -408,12 +407,31 @@ int main(int argc, const char *argv[])
             writeCollapsedTreeDOT(activeTree, "genetree_x0_arg_unary_collapsed.dot");
         }
         double currentX = startX;
-        appendTreeSnapshotCSV("smc_tree_snapshots.csv", activeTree, timer, 0, currentX, currentX);
+        appendTreeSnapshotCSV(treeSnapshots, activeTree, timer, 0, currentX, currentX);
         vector<GeneFluxEvent_SMC> geneFluxActive;
         vector<GeneFluxEvent_SMC> geneFluxLog;
         vector<EdgeWeight> last_standard_edges;
         vector<EdgeWeight> last_inverted_edges;
         vector<bool> targetEmitted(params.paramData->targetSNPs.size(), false);
+        if (targetMode) {
+            const double eps = 1e-15;
+            vector<double> x0Targets;
+            for (size_t i = 0; i < params.paramData->targetSNPs.size(); ++i) {
+                if (targetEmitted[i]) continue;
+                const double targetX = params.paramData->targetSNPs[i];
+                if (std::abs(targetX - currentX) <= eps) {
+                    x0Targets.push_back(targetX);
+                    targetEmitted[i] = true;
+                }
+            }
+            for (double targetX : x0Targets) {
+                std::ostringstream targetBase;
+                targetBase << "genetree_target"
+                           << formatCoordForFilename(targetX)
+                           << "_hop0_x" << formatCoordForFilename(currentX);
+                writeTreeArtifacts(activeTree, targetBase.str());
+            }
+        }
 
         int hop = 0;
         while (currentX < params.paramData->smcRange.R) {
@@ -542,7 +560,7 @@ int main(int argc, const char *argv[])
             if (finalHopDelta <= 0.0) {
                 continue;
             }
-            appendTreeSnapshotCSV("smc_tree_snapshots.csv", activeTree, timer, hop + 1, currentX, nextX);
+            appendTreeSnapshotCSV(treeSnapshots, activeTree, timer, hop + 1, currentX, nextX);
 
             bool writeThisHop = writeAllDiagnostics;
             vector<double> targetsForThisHop;
