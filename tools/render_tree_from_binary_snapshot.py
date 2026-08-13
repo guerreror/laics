@@ -50,11 +50,14 @@ def select_run(snapshots, requested_run):
         if requested_run not in runs:
             raise ValueError(f"run {requested_run} not found. Available runs: {runs}")
         return requested_run
-    if len(runs) == 1:
-        return runs[0]
     print(f"Available runs: {runs[0]}..{runs[-1]} ({len(runs)} total)")
-    text = input(f"Run to render [{runs[0]}]: ").strip()
-    return runs[0] if text == "" else int(text)
+    text = input("Run number to render: ").strip()
+    if text == "":
+        raise ValueError("Run number is required.")
+    run = int(text)
+    if run not in runs:
+        raise ValueError(f"run {run} not found. Available runs: {runs}")
+    return run
 
 
 def select_snapshot(snapshots, run, target_x):
@@ -221,7 +224,10 @@ def main() -> int:
         run = select_run(snapshots, args.run)
         target_x = args.target_x
         if target_x is None:
-            target_x = float(input("Chromosome x position to render: ").strip())
+            text = input("Chromosome x position to render: ").strip()
+            if text == "":
+                raise ValueError("Chromosome x position is required.")
+            target_x = float(text)
         key = select_snapshot(snapshots, run, target_x)
         nodes, edges = build_nodes_edges(snapshots[key])
         ts = build_tskit(nodes, edges, args.sequence_length)
