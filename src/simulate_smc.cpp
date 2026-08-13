@@ -432,14 +432,6 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
 
     unsigned long nextId = std::max(getMaxId(mainRoot), getMaxId(cutRoot)) + 1;
     double currentTime = std::max(root_time, cutLineageTime);
-    if (mainRoot->time < currentTime) {
-        TreeNode* nr = addUnaryAbove(mainRoot, nextId++, currentTime, mainRoot->context);
-        if (nr && nr->parent == nullptr) mainRoot = nr;
-    }
-    if (cutRoot->time < currentTime) {
-        TreeNode* nr = addUnaryAbove(cutRoot, nextId++, currentTime, cutRoot->context);
-        if (nr && nr->parent == nullptr) cutRoot = nr;
-    }
     applyEpochEventsToLineageAtTime_SMC(mainRoot, currentTime, params, nextId);
     applyEpochEventsToLineageAtTime_SMC(cutRoot, currentTime, params, nextId);
 

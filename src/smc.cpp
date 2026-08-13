@@ -510,8 +510,6 @@ int main(int argc, const char *argv[])
             if (rho <= 0.0) {
                 break;
             }
-            const double preCutRootTime = activeTree ? activeTree->time : 0.0;
-
             TreeNode* workingTree = cloneTree(activeTree);
             unsigned long cutParentId = 0;
             unsigned long cutChildId = 0;
@@ -536,14 +534,6 @@ int main(int argc, const char *argv[])
                 std::cerr << "SMC cut-tree step skipped (invalid cut edge).\n";
                 break;
             }
-            if (workingTree && workingTree->time < preCutRootTime) {
-                unsigned long nextId = std::max(getMaxId(workingTree), getMaxId(cutSubtree)) + 1;
-                TreeNode* boundary = addUnaryAbove(workingTree, nextId, preCutRootTime, workingTree->context);
-                if (boundary && boundary->parent == nullptr) {
-                    workingTree = boundary;
-                }
-            }
-
             SMCStepOutcome outcome;
             bool ok = simulateSMCOnTree_SMC(workingTree,
                                             cutSubtree,

@@ -154,7 +154,20 @@ bool reattachAtTimeWithContext(TreeNode*& mainRoot,
     return true;
 }
 
-bool cutAtNodeWithUnaryCleanup(TreeNode*& root, TreeNode* cutNode, TreeNode** outCutSubtree) {
+static TreeNode* trimRetainedSiblingAfterCut(TreeNode* node, double cutTime) {
+    while (node && node->children.size() == 1 && node->time > cutTime) {
+        TreeNode* child = node->children.front();
+        if (!(node->context == child->context)) break;
+        node->children.clear();
+        node->parent = nullptr;
+        child->parent = nullptr;
+        delete node;
+        node = child;
+    }
+    return node;
+}
+
+bool cutAtNodeWithUnaryCleanup(TreeNode*& root, TreeNode* cutNode, double cutTime, TreeNode** outCutSubtree) {
     if (!root || !cutNode || !outCutSubtree) return false;
     if (!cutNode->parent) return false;
 
@@ -180,6 +193,7 @@ bool cutAtNodeWithUnaryCleanup(TreeNode*& root, TreeNode* cutNode, TreeNode** ou
                 break;
             }
         }
+        sibling = trimRetainedSiblingAfterCut(sibling, cutTime);
     }
 
     // Detach cut subtree root.
@@ -238,7 +252,7 @@ bool cutEdgeRandomWithCleanup(TreeNode*& root,
         *outCutTime = t_cut;
     }
 
-    return cutAtNodeWithUnaryCleanup(root, child, outCutSubtree);
+    return cutAtNodeWithUnaryCleanup(root, child, t_cut, outCutSubtree);
 }
 
 void trimUnaryRootStem(TreeNode*& root) {

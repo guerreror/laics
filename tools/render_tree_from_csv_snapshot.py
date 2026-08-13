@@ -223,7 +223,7 @@ def main() -> int:
         key = select_snapshot(snapshots, run, target_x)
         nodes, edges = build_nodes_edges(snapshots[key])
         ts = build_tskit(nodes, edges, args.sequence_length)
-        base = f"selected_tree_run{key[0]}_hop{key[1]}_x{clean_x(target_x)}"
+        base = f"csv_run{key[0]}_hop{key[1]}_x{clean_x(target_x)}"
         out_svg = base + ".tskit.svg"
         out_png = base + ".tskit.png"
         render_svg(ts, out_svg, args.width, args.height, args.show_labels)

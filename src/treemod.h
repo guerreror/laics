@@ -18,7 +18,7 @@ TreeNode* cloneTree(const TreeNode* root);
 void freeTree(TreeNode* root);
 
 TreeNode* findNodeById(TreeNode* root, unsigned long id);
-bool cutAtNodeWithUnaryCleanup(TreeNode*& root, TreeNode* cutNode, TreeNode** outCutSubtree);
+bool cutAtNodeWithUnaryCleanup(TreeNode*& root, TreeNode* cutNode, double cutTime, TreeNode** outCutSubtree);
 bool cutEdgeRandomWithCleanup(TreeNode*& root,
                               TreeNode* parent,
                               TreeNode* child,
