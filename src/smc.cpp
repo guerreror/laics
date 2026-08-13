@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <iomanip>
+#include <cstdint>
 
 using namespace std;
 
@@ -158,11 +159,10 @@ static void collectEdgeWeightsFromTree(
         const unsigned int pop = child->context.pop;
         const SMCActiveState state = activeStateAtTime_SMC(params, child->time);
         if (leavesRetainedTree && pop < state.popSizes.size() && pop < state.invFreqs.size()) {
-            const double popN = state.popSizes[pop];
             const double pI = state.invFreqs[pop];
             const double branchL = node->time - child->time;
             if (branchL > 0.0) {
-                const double base = 2.0 * r * popN * branchL;
+                const double base = r * branchL;
                 if (child->context.inversion == 1) {
                     inverted_edges.push_back({node->id, child->id, base * pI});
                 } else {
@@ -210,6 +210,60 @@ static void writeTreeArtifacts(TreeNode* tree, const std::string& base)
         std::cerr << "Warning: failed to render " << collapsedDot
                   << " to tskit SVG.\n";
     }
+}
+
+template <typename T>
+static void writeBinaryValue(std::ofstream& out, const T& value)
+{
+    out.write(reinterpret_cast<const char*>(&value), sizeof(T));
+}
+
+static void writeTreeSnapshotBinaryRows(std::ofstream& out,
+                                        TreeNode* node,
+                                        int32_t run,
+                                        int32_t hop,
+                                        double xStart,
+                                        double xEnd,
+                                        int64_t parentId)
+{
+    if (!node) return;
+    const uint64_t nodeId = static_cast<uint64_t>(node->id);
+    const double time = node->time;
+    const uint32_t pop = static_cast<uint32_t>(node->context.pop);
+    const uint16_t inversion = static_cast<uint16_t>(node->context.inversion);
+    writeBinaryValue(out, run);
+    writeBinaryValue(out, hop);
+    writeBinaryValue(out, xStart);
+    writeBinaryValue(out, xEnd);
+    writeBinaryValue(out, nodeId);
+    writeBinaryValue(out, parentId);
+    writeBinaryValue(out, time);
+    writeBinaryValue(out, pop);
+    writeBinaryValue(out, inversion);
+    for (auto* child : node->children) {
+        writeTreeSnapshotBinaryRows(out, child, run, hop, xStart, xEnd,
+                                    static_cast<int64_t>(node->id));
+    }
+}
+
+static void initTreeSnapshotBinary(const std::string& path)
+{
+    std::ofstream out(path.c_str(), std::ios::binary);
+    if (!out.is_open()) return;
+    out.write("SMCTREE1", 8);
+}
+
+static void appendTreeSnapshotBinary(const std::string& path,
+                                     TreeNode* tree,
+                                     int run,
+                                     int hop,
+                                     double xStart,
+                                     double xEnd)
+{
+    std::ofstream out(path.c_str(), std::ios::binary | std::ios::app);
+    if (!out.is_open()) return;
+    writeTreeSnapshotBinaryRows(out, tree, static_cast<int32_t>(run),
+                                static_cast<int32_t>(hop), xStart, xEnd, -1);
 }
 
 static std::string formatCoordForFilename(double x)
@@ -316,6 +370,7 @@ int main(int argc, const char *argv[])
         if (hop_events.is_open()) {
             hop_events << "run,hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
         }
+        initTreeSnapshotBinary("smc_tree_snapshots.bin");
     }
 
     for (int timer = 0; timer < (int)nRuns; ++timer)
@@ -357,7 +412,7 @@ int main(int argc, const char *argv[])
             allNodes.back()->writeDOT("argtree.dot");
         }
 
-        const double r = 1.0e-11;
+        const double r = 1.0e-8;
         TreeNode* activeTree = buildX0TreeFromARGPreserveUnary(argStartX, allNodes.back());
         if (!activeTree) {
             std::cerr << "Could not build unary-preserving x0 tree from ARG.\n";
@@ -369,6 +424,7 @@ int main(int argc, const char *argv[])
             writeCollapsedTreeDOT(activeTree, "genetree_x0_arg_unary_collapsed.dot");
         }
         double currentX = startX;
+        appendTreeSnapshotBinary("smc_tree_snapshots.bin", activeTree, timer, 0, currentX, currentX);
         vector<GeneFluxEvent_SMC> geneFluxActive;
         vector<GeneFluxEvent_SMC> geneFluxLog;
         vector<EdgeWeight> last_standard_edges;
@@ -393,6 +449,7 @@ int main(int argc, const char *argv[])
             if (rho <= 0.0) {
                 break;
             }
+            const double preCutRootTime = activeTree ? activeTree->time : 0.0;
 
             TreeNode* workingTree = cloneTree(activeTree);
             unsigned long cutParentId = 0;
@@ -417,6 +474,13 @@ int main(int argc, const char *argv[])
                 freeTree(workingTree);
                 std::cerr << "SMC cut-tree step skipped (invalid cut edge).\n";
                 break;
+            }
+            if (workingTree && workingTree->time < preCutRootTime) {
+                unsigned long nextId = std::max(getMaxId(workingTree), getMaxId(cutSubtree)) + 1;
+                TreeNode* boundary = addUnaryAbove(workingTree, nextId, preCutRootTime, workingTree->context);
+                if (boundary && boundary->parent == nullptr) {
+                    workingTree = boundary;
+                }
             }
 
             SMCStepOutcome outcome;
@@ -494,6 +558,7 @@ int main(int argc, const char *argv[])
             if (finalHopDelta <= 0.0) {
                 continue;
             }
+            appendTreeSnapshotBinary("smc_tree_snapshots.bin", activeTree, timer, hop + 1, currentX, nextX);
 
             bool writeThisHop = writeAllDiagnostics;
             vector<double> targetsForThisHop;
