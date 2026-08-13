@@ -177,9 +177,16 @@ static GeneFluxEvent_SMC makeGeneFluxSegment_SMC(double startX,
 static unsigned int pickMigrationDest_SMC(unsigned int fromPop,
                                           const std::vector<std::vector<double>>& mig_prob) {
     const auto& row = mig_prob.at(fromPop);
-    double roll = randreal(0, 1);
+    double offDiagTotal = 0.0;
+    for (unsigned int i = 0; i < row.size(); ++i) {
+        if (i != fromPop) offDiagTotal += row[i];
+    }
+    if (offDiagTotal <= 0.0) return fromPop;
+
+    double roll = randreal(0, offDiagTotal);
     double cum = 0.0;
     for (unsigned int i = 0; i < row.size(); ++i) {
+        if (i == fromPop) continue;
         cum += row[i];
         if (roll <= cum) return i;
     }
