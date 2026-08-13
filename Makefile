@@ -2,7 +2,7 @@ ROOT := $(CURDIR)
 SRC := $(ROOT)/src
 EXEC := $(ROOT)/executables/labp_smc
 PYTHON := $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
-.PHONY: run run-smc run-arg compile delete-op clean-generated run-tree
+.PHONY: run run-smc run-arg compile delete-op clean-generated run-tree run-tree-csv run-tree-bin
 
 run-smc:
 	@cd "$(ROOT)" && "$(PYTHON)" src/param.py --config src/parameters_smc.yaml
@@ -11,7 +11,13 @@ run-arg:
 	@cd "$(ROOT)" && "$(PYTHON)" src/param.py --config src/parameters_arg.yaml
 
 run-tree:
+	@$(MAKE) run-tree-bin
+
+run-tree-csv:
 	@cd "$(ROOT)" && "$(PYTHON)" tools/render_tree_from_csv_snapshot.py
+
+run-tree-bin:
+	@cd "$(ROOT)" && "$(PYTHON)" tools/render_tree_from_binary_snapshot.py
 
 compile:
 	@cd "$(SRC)" && g++ -std=c++14 -O3 -g -fno-omit-frame-pointer \

@@ -16,6 +16,8 @@
 #include <algorithm>
 #include <cstdlib>
 #include <iomanip>
+#include <cstdint>
+#include <cstring>
 
 using namespace std;
 
@@ -246,6 +248,58 @@ static void appendTreeSnapshotCSV(std::ofstream& out,
     writeTreeSnapshotCSVRows(out, tree, run, hop, xStart, xEnd, -1);
 }
 
+template <typename T>
+static void packBinaryValue(char* buffer, size_t& offset, const T& value)
+{
+    std::memcpy(buffer + offset, &value, sizeof(T));
+    offset += sizeof(T);
+}
+
+static void writeTreeSnapshotBinaryRows(std::ofstream& out,
+                                        TreeNode* node,
+                                        int32_t run,
+                                        int32_t hop,
+                                        double xStart,
+                                        double xEnd,
+                                        int64_t parentId)
+{
+    if (!node) return;
+    const uint64_t nodeId = static_cast<uint64_t>(node->id);
+    const double time = node->time;
+    const uint32_t pop = static_cast<uint32_t>(node->context.pop);
+    const uint16_t inversion = static_cast<uint16_t>(node->context.inversion);
+    char record[sizeof(run) + sizeof(hop) + sizeof(xStart) + sizeof(xEnd) +
+                sizeof(nodeId) + sizeof(parentId) + sizeof(time) +
+                sizeof(pop) + sizeof(inversion)];
+    size_t offset = 0;
+    packBinaryValue(record, offset, run);
+    packBinaryValue(record, offset, hop);
+    packBinaryValue(record, offset, xStart);
+    packBinaryValue(record, offset, xEnd);
+    packBinaryValue(record, offset, nodeId);
+    packBinaryValue(record, offset, parentId);
+    packBinaryValue(record, offset, time);
+    packBinaryValue(record, offset, pop);
+    packBinaryValue(record, offset, inversion);
+    out.write(record, sizeof(record));
+    for (auto* child : node->children) {
+        writeTreeSnapshotBinaryRows(out, child, run, hop, xStart, xEnd,
+                                    static_cast<int64_t>(node->id));
+    }
+}
+
+static void appendTreeSnapshotBinary(std::ofstream& out,
+                                     TreeNode* tree,
+                                     int run,
+                                     int hop,
+                                     double xStart,
+                                     double xEnd)
+{
+    if (!out.is_open()) return;
+    writeTreeSnapshotBinaryRows(out, tree, static_cast<int32_t>(run),
+                                static_cast<int32_t>(hop), xStart, xEnd, -1);
+}
+
 static std::string formatCoordForFilename(double x)
 {
     std::ostringstream ss;
@@ -351,9 +405,13 @@ int main(int argc, const char *argv[])
             hop_events << "run,hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
         }
     }
-    std::ofstream treeSnapshots("smc_tree_snapshots.csv");
-    if (treeSnapshots.is_open()) {
-        treeSnapshots << "run,hop,x_start,x_end,node_id,parent_id,time,pop,inversion\n";
+    std::ofstream treeSnapshotsCSV("smc_tree_snapshots.csv");
+    if (treeSnapshotsCSV.is_open()) {
+        treeSnapshotsCSV << "run,hop,x_start,x_end,node_id,parent_id,time,pop,inversion\n";
+    }
+    std::ofstream treeSnapshotsBin("smc_tree_snapshots.bin", std::ios::binary);
+    if (treeSnapshotsBin.is_open()) {
+        treeSnapshotsBin.write("SMCTREE1", 8);
     }
 
     for (int timer = 0; timer < (int)nRuns; ++timer)
@@ -407,7 +465,8 @@ int main(int argc, const char *argv[])
             writeCollapsedTreeDOT(activeTree, "genetree_x0_arg_unary_collapsed.dot");
         }
         double currentX = startX;
-        appendTreeSnapshotCSV(treeSnapshots, activeTree, timer, 0, currentX, currentX);
+        appendTreeSnapshotCSV(treeSnapshotsCSV, activeTree, timer, 0, currentX, currentX);
+        appendTreeSnapshotBinary(treeSnapshotsBin, activeTree, timer, 0, currentX, currentX);
         vector<GeneFluxEvent_SMC> geneFluxActive;
         vector<GeneFluxEvent_SMC> geneFluxLog;
         vector<EdgeWeight> last_standard_edges;
@@ -560,7 +619,8 @@ int main(int argc, const char *argv[])
             if (finalHopDelta <= 0.0) {
                 continue;
             }
-            appendTreeSnapshotCSV(treeSnapshots, activeTree, timer, hop + 1, currentX, nextX);
+            appendTreeSnapshotCSV(treeSnapshotsCSV, activeTree, timer, hop + 1, currentX, nextX);
+            appendTreeSnapshotBinary(treeSnapshotsBin, activeTree, timer, hop + 1, currentX, nextX);
 
             bool writeThisHop = writeAllDiagnostics;
             vector<double> targetsForThisHop;
