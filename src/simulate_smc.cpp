@@ -5,6 +5,7 @@
 #include "simulate_smc.h"
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -302,6 +303,86 @@ static void collectReattachCandidates_SMC(TreeNode* node,
     }
 }
 
+static void collectInversionAgeCandidates_SMC(TreeNode* node,
+                                              double t,
+                                              const Parameters::ParameterData& params,
+                                              std::vector<ReattachCandidate_SMC>& out) {
+    if (!node) return;
+    for (auto* ch : node->children) {
+        const Context ctx = contextAfterSpeciationEvents_SMC(ch->context, params, t);
+        if (node->time >= t && ch->time <= t && ctx.inversion == 1) {
+            out.push_back({node, ch});
+        }
+        collectInversionAgeCandidates_SMC(ch, t, params, out);
+    }
+}
+
+static bool replaceChild_SMC(TreeNode* parent, TreeNode* oldChild, TreeNode* newChild) {
+    if (!parent) return false;
+    for (auto it = parent->children.begin(); it != parent->children.end(); ++it) {
+        if (*it == oldChild) {
+            if (newChild) {
+                *it = newChild;
+                newChild->parent = parent;
+            } else {
+                parent->children.erase(it);
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool collapseInversionAge_SMC(TreeNode*& mainRoot,
+                                     TreeNode*& cutRoot,
+                                     double eventTime,
+                                     const Parameters::ParameterData& params,
+                                     unsigned long& nextId,
+                                     bool& cutCollapsed) {
+    cutCollapsed = false;
+    if (params.inv_age == 0) return false;
+    const double invAge = static_cast<double>(params.inv_age);
+    if (std::abs(eventTime - invAge) > 1e-9) return false;
+
+    std::vector<ReattachCandidate_SMC> candidates;
+    collectInversionAgeCandidates_SMC(mainRoot, eventTime, params, candidates);
+    const bool cutInverted = cutRoot &&
+        contextAfterSpeciationEvents_SMC(cutRoot->context, params, eventTime).inversion == 1;
+    if (candidates.empty() && !cutInverted) return false;
+
+    const Context originCtx(0, 0);
+    if (candidates.empty()) {
+        TreeNode* nr = addUnaryAbove(cutRoot, nextId++, eventTime, originCtx);
+        if (nr && nr->parent == nullptr) cutRoot = nr;
+        return true;
+    }
+
+    TreeNode* origin = new TreeNode();
+    origin->id = nextId++;
+    origin->time = eventTime;
+    origin->context = originCtx;
+    origin->parent = nullptr;
+
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        TreeNode* child = candidates[i].child;
+        if (i == 0) {
+            replaceChild_SMC(candidates[i].parent, child, origin);
+        } else {
+            replaceChild_SMC(candidates[i].parent, child, nullptr);
+        }
+        child->parent = origin;
+        origin->children.push_back(child);
+    }
+    if (!origin->parent) mainRoot = origin;
+
+    if (cutInverted) {
+        cutRoot->parent = origin;
+        origin->children.push_back(cutRoot);
+        cutCollapsed = true;
+    }
+    return true;
+}
+
 static bool reattachAtTimeWithEpochContext_SMC(TreeNode*& mainRoot,
                                                TreeNode* cutRoot,
                                                double eventTime,
@@ -593,6 +674,22 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
             crossedEpoch = true;
         }
         if (crossedEpoch && nextEpoch < root_time) {
+            if (params.inv_age > 0 &&
+                std::abs(nextEpoch - static_cast<double>(params.inv_age)) <= 1e-9) {
+                unsigned long nextId = std::max(getMaxId(mainRoot), getMaxId(cutRoot)) + 1;
+                bool cutCollapsed = false;
+                if (collapseInversionAge_SMC(mainRoot, cutRoot, nextEpoch, params, nextId, cutCollapsed) &&
+                    cutCollapsed) {
+                    recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX,
+                                       "inversion_age_coalescence", nextEpoch);
+                    if (outcome) {
+                        outcome->coalesced = true;
+                        outcome->hitRootLimit = false;
+                        outcome->stopTime = nextEpoch;
+                    }
+                    return true;
+                }
+            }
             lineageTime = nextEpoch;
             unsigned long nextId = std::max(getMaxId(mainRoot), getMaxId(cutRoot)) + 1;
             applyEpochEventsToLineageAtTime_SMC(cutRoot, lineageTime, params, nextId);
