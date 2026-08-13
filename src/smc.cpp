@@ -158,11 +158,10 @@ static void collectEdgeWeightsFromTree(
         const unsigned int pop = child->context.pop;
         const SMCActiveState state = activeStateAtTime_SMC(params, child->time);
         if (leavesRetainedTree && pop < state.popSizes.size() && pop < state.invFreqs.size()) {
-            const double popN = state.popSizes[pop];
             const double pI = state.invFreqs[pop];
             const double branchL = node->time - child->time;
             if (branchL > 0.0) {
-                const double base = 2.0 * r * popN * branchL;
+                const double base = r * branchL;
                 if (child->context.inversion == 1) {
                     inverted_edges.push_back({node->id, child->id, base * pI});
                 } else {
@@ -210,6 +209,42 @@ static void writeTreeArtifacts(TreeNode* tree, const std::string& base)
         std::cerr << "Warning: failed to render " << collapsedDot
                   << " to tskit SVG.\n";
     }
+}
+
+static void writeTreeSnapshotCSVRows(std::ofstream& out,
+                                     TreeNode* node,
+                                     int run,
+                                     int hop,
+                                     double xStart,
+                                     double xEnd,
+                                     long long parentId)
+{
+    if (!node) return;
+    out << run << ","
+        << hop << ","
+        << std::setprecision(17) << xStart << ","
+        << std::setprecision(17) << xEnd << ","
+        << node->id << ","
+        << parentId << ","
+        << std::setprecision(17) << node->time << ","
+        << node->context.pop << ","
+        << node->context.inversion << "\n";
+    for (auto* child : node->children) {
+        writeTreeSnapshotCSVRows(out, child, run, hop, xStart, xEnd,
+                                 static_cast<long long>(node->id));
+    }
+}
+
+static void appendTreeSnapshotCSV(const std::string& path,
+                                  TreeNode* tree,
+                                  int run,
+                                  int hop,
+                                  double xStart,
+                                  double xEnd)
+{
+    std::ofstream out(path.c_str(), std::ios::app);
+    if (!out.is_open()) return;
+    writeTreeSnapshotCSVRows(out, tree, run, hop, xStart, xEnd, -1);
 }
 
 static std::string formatCoordForFilename(double x)
@@ -316,6 +351,10 @@ int main(int argc, const char *argv[])
         if (hop_events.is_open()) {
             hop_events << "run,hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
         }
+        std::ofstream snapshots("smc_tree_snapshots.csv");
+        if (snapshots.is_open()) {
+            snapshots << "run,hop,x_start,x_end,node_id,parent_id,time,pop,inversion\n";
+        }
     }
 
     for (int timer = 0; timer < (int)nRuns; ++timer)
@@ -357,7 +396,7 @@ int main(int argc, const char *argv[])
             allNodes.back()->writeDOT("argtree.dot");
         }
 
-        const double r = 1.0e-11;
+        const double r = 1.0e-8;
         TreeNode* activeTree = buildX0TreeFromARGPreserveUnary(argStartX, allNodes.back());
         if (!activeTree) {
             std::cerr << "Could not build unary-preserving x0 tree from ARG.\n";
@@ -369,6 +408,7 @@ int main(int argc, const char *argv[])
             writeCollapsedTreeDOT(activeTree, "genetree_x0_arg_unary_collapsed.dot");
         }
         double currentX = startX;
+        appendTreeSnapshotCSV("smc_tree_snapshots.csv", activeTree, timer, 0, currentX, currentX);
         vector<GeneFluxEvent_SMC> geneFluxActive;
         vector<GeneFluxEvent_SMC> geneFluxLog;
         vector<EdgeWeight> last_standard_edges;
@@ -393,6 +433,7 @@ int main(int argc, const char *argv[])
             if (rho <= 0.0) {
                 break;
             }
+            const double preCutRootTime = activeTree ? activeTree->time : 0.0;
 
             TreeNode* workingTree = cloneTree(activeTree);
             unsigned long cutParentId = 0;
@@ -417,6 +458,13 @@ int main(int argc, const char *argv[])
                 freeTree(workingTree);
                 std::cerr << "SMC cut-tree step skipped (invalid cut edge).\n";
                 break;
+            }
+            if (workingTree && workingTree->time < preCutRootTime) {
+                unsigned long nextId = std::max(getMaxId(workingTree), getMaxId(cutSubtree)) + 1;
+                TreeNode* boundary = addUnaryAbove(workingTree, nextId, preCutRootTime, workingTree->context);
+                if (boundary && boundary->parent == nullptr) {
+                    workingTree = boundary;
+                }
             }
 
             SMCStepOutcome outcome;
@@ -494,6 +542,7 @@ int main(int argc, const char *argv[])
             if (finalHopDelta <= 0.0) {
                 continue;
             }
+            appendTreeSnapshotCSV("smc_tree_snapshots.csv", activeTree, timer, hop + 1, currentX, nextX);
 
             bool writeThisHop = writeAllDiagnostics;
             vector<double> targetsForThisHop;
