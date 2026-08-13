@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <iomanip>
 #include <cstdint>
+#include <cstring>
 
 using namespace std;
 
@@ -213,9 +214,10 @@ static void writeTreeArtifacts(TreeNode* tree, const std::string& base)
 }
 
 template <typename T>
-static void writeBinaryValue(std::ofstream& out, const T& value)
+static void packBinaryValue(char* buffer, size_t& offset, const T& value)
 {
-    out.write(reinterpret_cast<const char*>(&value), sizeof(T));
+    std::memcpy(buffer + offset, &value, sizeof(T));
+    offset += sizeof(T);
 }
 
 static void writeTreeSnapshotBinaryRows(std::ofstream& out,
@@ -231,36 +233,33 @@ static void writeTreeSnapshotBinaryRows(std::ofstream& out,
     const double time = node->time;
     const uint32_t pop = static_cast<uint32_t>(node->context.pop);
     const uint16_t inversion = static_cast<uint16_t>(node->context.inversion);
-    writeBinaryValue(out, run);
-    writeBinaryValue(out, hop);
-    writeBinaryValue(out, xStart);
-    writeBinaryValue(out, xEnd);
-    writeBinaryValue(out, nodeId);
-    writeBinaryValue(out, parentId);
-    writeBinaryValue(out, time);
-    writeBinaryValue(out, pop);
-    writeBinaryValue(out, inversion);
+    char record[sizeof(run) + sizeof(hop) + sizeof(xStart) + sizeof(xEnd) +
+                sizeof(nodeId) + sizeof(parentId) + sizeof(time) +
+                sizeof(pop) + sizeof(inversion)];
+    size_t offset = 0;
+    packBinaryValue(record, offset, run);
+    packBinaryValue(record, offset, hop);
+    packBinaryValue(record, offset, xStart);
+    packBinaryValue(record, offset, xEnd);
+    packBinaryValue(record, offset, nodeId);
+    packBinaryValue(record, offset, parentId);
+    packBinaryValue(record, offset, time);
+    packBinaryValue(record, offset, pop);
+    packBinaryValue(record, offset, inversion);
+    out.write(record, sizeof(record));
     for (auto* child : node->children) {
         writeTreeSnapshotBinaryRows(out, child, run, hop, xStart, xEnd,
                                     static_cast<int64_t>(node->id));
     }
 }
 
-static void initTreeSnapshotBinary(const std::string& path)
-{
-    std::ofstream out(path.c_str(), std::ios::binary);
-    if (!out.is_open()) return;
-    out.write("SMCTREE1", 8);
-}
-
-static void appendTreeSnapshotBinary(const std::string& path,
+static void appendTreeSnapshotBinary(std::ofstream& out,
                                      TreeNode* tree,
                                      int run,
                                      int hop,
                                      double xStart,
                                      double xEnd)
 {
-    std::ofstream out(path.c_str(), std::ios::binary | std::ios::app);
     if (!out.is_open()) return;
     writeTreeSnapshotBinaryRows(out, tree, static_cast<int32_t>(run),
                                 static_cast<int32_t>(hop), xStart, xEnd, -1);
@@ -370,7 +369,10 @@ int main(int argc, const char *argv[])
         if (hop_events.is_open()) {
             hop_events << "run,hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
         }
-        initTreeSnapshotBinary("smc_tree_snapshots.bin");
+    }
+    std::ofstream treeSnapshots("smc_tree_snapshots.bin", std::ios::binary);
+    if (treeSnapshots.is_open()) {
+        treeSnapshots.write("SMCTREE1", 8);
     }
 
     for (int timer = 0; timer < (int)nRuns; ++timer)
@@ -424,12 +426,31 @@ int main(int argc, const char *argv[])
             writeCollapsedTreeDOT(activeTree, "genetree_x0_arg_unary_collapsed.dot");
         }
         double currentX = startX;
-        appendTreeSnapshotBinary("smc_tree_snapshots.bin", activeTree, timer, 0, currentX, currentX);
+        appendTreeSnapshotBinary(treeSnapshots, activeTree, timer, 0, currentX, currentX);
         vector<GeneFluxEvent_SMC> geneFluxActive;
         vector<GeneFluxEvent_SMC> geneFluxLog;
         vector<EdgeWeight> last_standard_edges;
         vector<EdgeWeight> last_inverted_edges;
         vector<bool> targetEmitted(params.paramData->targetSNPs.size(), false);
+        if (targetMode) {
+            const double eps = 1e-15;
+            vector<double> x0Targets;
+            for (size_t i = 0; i < params.paramData->targetSNPs.size(); ++i) {
+                if (targetEmitted[i]) continue;
+                const double targetX = params.paramData->targetSNPs[i];
+                if (std::abs(targetX - currentX) <= eps) {
+                    x0Targets.push_back(targetX);
+                    targetEmitted[i] = true;
+                }
+            }
+            for (double targetX : x0Targets) {
+                std::ostringstream targetBase;
+                targetBase << "genetree_target"
+                           << formatCoordForFilename(targetX)
+                           << "_hop0_x" << formatCoordForFilename(currentX);
+                writeTreeArtifacts(activeTree, targetBase.str());
+            }
+        }
 
         int hop = 0;
         while (currentX < params.paramData->smcRange.R) {
@@ -558,7 +579,7 @@ int main(int argc, const char *argv[])
             if (finalHopDelta <= 0.0) {
                 continue;
             }
-            appendTreeSnapshotBinary("smc_tree_snapshots.bin", activeTree, timer, hop + 1, currentX, nextX);
+            appendTreeSnapshotBinary(treeSnapshots, activeTree, timer, hop + 1, currentX, nextX);
 
             bool writeThisHop = writeAllDiagnostics;
             vector<double> targetsForThisHop;
