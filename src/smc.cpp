@@ -16,6 +16,8 @@
 #include <algorithm>
 #include <cstdlib>
 #include <iomanip>
+#include <cstdint>
+#include <cstring>
 
 using namespace std;
 
@@ -170,7 +172,6 @@ static void collectEdgeWeightsFromTree(
         const unsigned int pop = child->context.pop;
         const SMCActiveState state = activeStateAtTime_SMC(params, child->time);
         if (leavesRetainedTree && pop < state.popSizes.size() && pop < state.invFreqs.size()) {
-            const double popN = state.popSizes[pop];
             const double pI = state.invFreqs[pop];
             const double branchL = node->time - child->time;
             if (branchL > 0.0) {
@@ -222,6 +223,93 @@ static void writeTreeArtifacts(TreeNode* tree, const std::string& base)
         std::cerr << "Warning: failed to render " << collapsedDot
                   << " to tskit SVG.\n";
     }
+}
+
+static void writeTreeSnapshotCSVRows(std::ofstream& out,
+                                     TreeNode* node,
+                                     int run,
+                                     int hop,
+                                     double xStart,
+                                     double xEnd,
+                                     long long parentId)
+{
+    if (!node) return;
+    out << run << ","
+        << hop << ","
+        << std::setprecision(17) << xStart << ","
+        << std::setprecision(17) << xEnd << ","
+        << node->id << ","
+        << parentId << ","
+        << std::setprecision(17) << node->time << ","
+        << node->context.pop << ","
+        << node->context.inversion << "\n";
+    for (auto* child : node->children) {
+        writeTreeSnapshotCSVRows(out, child, run, hop, xStart, xEnd,
+                                 static_cast<long long>(node->id));
+    }
+}
+
+static void appendTreeSnapshotCSV(std::ofstream& out,
+                                  TreeNode* tree,
+                                  int run,
+                                  int hop,
+                                  double xStart,
+                                  double xEnd)
+{
+    if (!out.is_open()) return;
+    writeTreeSnapshotCSVRows(out, tree, run, hop, xStart, xEnd, -1);
+}
+
+template <typename T>
+static void packBinaryValue(char* buffer, size_t& offset, const T& value)
+{
+    std::memcpy(buffer + offset, &value, sizeof(T));
+    offset += sizeof(T);
+}
+
+static void writeTreeSnapshotBinaryRows(std::ofstream& out,
+                                        TreeNode* node,
+                                        int32_t run,
+                                        int32_t hop,
+                                        double xStart,
+                                        double xEnd,
+                                        int64_t parentId)
+{
+    if (!node) return;
+    const uint64_t nodeId = static_cast<uint64_t>(node->id);
+    const double time = node->time;
+    const uint32_t pop = static_cast<uint32_t>(node->context.pop);
+    const uint16_t inversion = static_cast<uint16_t>(node->context.inversion);
+    char record[sizeof(run) + sizeof(hop) + sizeof(xStart) + sizeof(xEnd) +
+                sizeof(nodeId) + sizeof(parentId) + sizeof(time) +
+                sizeof(pop) + sizeof(inversion)];
+    size_t offset = 0;
+    packBinaryValue(record, offset, run);
+    packBinaryValue(record, offset, hop);
+    packBinaryValue(record, offset, xStart);
+    packBinaryValue(record, offset, xEnd);
+    packBinaryValue(record, offset, nodeId);
+    packBinaryValue(record, offset, parentId);
+    packBinaryValue(record, offset, time);
+    packBinaryValue(record, offset, pop);
+    packBinaryValue(record, offset, inversion);
+    out.write(record, sizeof(record));
+    for (auto* child : node->children) {
+        writeTreeSnapshotBinaryRows(out, child, run, hop, xStart, xEnd,
+                                    static_cast<int64_t>(node->id));
+    }
+}
+
+static void appendTreeSnapshotBinary(std::ofstream& out,
+                                     TreeNode* tree,
+                                     int run,
+                                     int hop,
+                                     double xStart,
+                                     double xEnd)
+{
+    if (!out.is_open()) return;
+    writeTreeSnapshotBinaryRows(out, tree, static_cast<int32_t>(run),
+                                static_cast<int32_t>(hop), xStart, xEnd, -1);
 }
 
 static std::string formatCoordForFilename(double x)
@@ -486,6 +574,14 @@ int main(int argc, const char *argv[])
             hop_events << "run,hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
         }
     }
+    std::ofstream treeSnapshotsCSV("smc_tree_snapshots.csv");
+    if (treeSnapshotsCSV.is_open()) {
+        treeSnapshotsCSV << "run,hop,x_start,x_end,node_id,parent_id,time,pop,inversion\n";
+    }
+    std::ofstream treeSnapshotsBin("smc_tree_snapshots.bin", std::ios::binary);
+    if (treeSnapshotsBin.is_open()) {
+        treeSnapshotsBin.write("SMCTREE1", 8);
+    }
 
     for (int timer = 0; timer < (int)nRuns; ++timer)
     {
@@ -538,11 +634,32 @@ int main(int argc, const char *argv[])
             writeCollapsedTreeDOT(activeTree, pathJoin(tree_dir, "genetree_x0_arg_unary_collapsed.dot"));
         }
         double currentX = startX;
+        appendTreeSnapshotCSV(treeSnapshotsCSV, activeTree, timer, 0, currentX, currentX);
+        appendTreeSnapshotBinary(treeSnapshotsBin, activeTree, timer, 0, currentX, currentX);
         vector<GeneFluxEvent_SMC> geneFluxActive;
         vector<GeneFluxEvent_SMC> geneFluxLog;
         vector<EdgeWeight> last_standard_edges;
         vector<EdgeWeight> last_inverted_edges;
         vector<bool> targetEmitted(params.paramData->targetSNPs.size(), false);
+        if (targetMode) {
+            const double eps = 1e-15;
+            vector<double> x0Targets;
+            for (size_t i = 0; i < params.paramData->targetSNPs.size(); ++i) {
+                if (targetEmitted[i]) continue;
+                const double targetX = params.paramData->targetSNPs[i];
+                if (std::abs(targetX - currentX) <= eps) {
+                    x0Targets.push_back(targetX);
+                    targetEmitted[i] = true;
+                }
+            }
+            for (double targetX : x0Targets) {
+                std::ostringstream targetBase;
+                targetBase << "genetree_target"
+                           << formatCoordForFilename(targetX)
+                           << "_hop0_x" << formatCoordForFilename(currentX);
+                writeTreeArtifacts(activeTree, targetBase.str());
+            }
+        }
         bool hopTraceHeaderWritten = false;
         bool hopEventsHeaderWritten = false;
         if (writeAllDiagnostics) {
@@ -629,7 +746,6 @@ int main(int argc, const char *argv[])
                 std::cerr << "SMC cut-tree step skipped (invalid cut edge).\n";
                 break;
             }
-
             SMCStepOutcome outcome;
             bool ok = simulateSMCOnTree_SMC(workingTree,
                                             cutSubtree,
@@ -716,6 +832,8 @@ int main(int argc, const char *argv[])
             if (finalHopDelta <= 0.0) {
                 continue;
             }
+            appendTreeSnapshotCSV(treeSnapshotsCSV, activeTree, timer, hop + 1, currentX, nextX);
+            appendTreeSnapshotBinary(treeSnapshotsBin, activeTree, timer, hop + 1, currentX, nextX);
 
             bool writeThisHop = writeAllDiagnostics;
             vector<double> targetsForThisHop;
