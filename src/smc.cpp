@@ -18,6 +18,7 @@
 #include <iomanip>
 #include <cstdint>
 #include <cstring>
+#include <unordered_map>
 
 using namespace std;
 
@@ -395,15 +396,13 @@ int main(int argc, const char *argv[])
         mig_prob_cut = mig_prob;
     };
 
-    {
-        std::ofstream hoplog("smc_hop_trace.csv");
-        if (hoplog.is_open()) {
-            hoplog << "run,hop,current_x,raw_delta_x,used_delta_x,next_x,rho,Li_sum,Ls_sum,root_time\n";
-        }
-        std::ofstream hop_events("smc_hop_events.csv");
-        if (hop_events.is_open()) {
-            hop_events << "run,hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
-        }
+    std::ofstream hopTrace("smc_hop_trace.csv");
+    if (hopTrace.is_open()) {
+        hopTrace << "run,hop,current_x,raw_delta_x,used_delta_x,next_x,rho,Li_sum,Ls_sum,root_time\n";
+    }
+    std::ofstream hopEvents("smc_hop_events.csv");
+    if (hopEvents.is_open()) {
+        hopEvents << "run,hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
     }
     std::ofstream treeSnapshotsCSV;
     if (params.paramData->csvSnapshots) {
@@ -470,6 +469,7 @@ int main(int argc, const char *argv[])
             writeTreeDOT(activeTree, "genetree_x0_arg_unary.dot");
             writeCollapsedTreeDOT(activeTree, "genetree_x0_arg_unary_collapsed.dot");
         }
+        unsigned long nextNodeId = getMaxId(activeTree) + 1;
         double currentX = startX;
         appendTreeSnapshotCSV(treeSnapshotsCSV, activeTree, timer, 0, currentX, currentX);
         appendTreeSnapshotBinary(treeSnapshotsBin, activeTree, timer, 0, currentX, currentX);
@@ -516,7 +516,8 @@ int main(int argc, const char *argv[])
             if (rho <= 0.0) {
                 break;
             }
-            TreeNode* workingTree = cloneTree(activeTree);
+            std::unordered_map<unsigned long, TreeNode*> clonedNodes;
+            TreeNode* workingTree = cloneTreeWithMap(activeTree, clonedNodes);
             unsigned long cutParentId = 0;
             unsigned long cutChildId = 0;
             bool picked = pickWeightedEdge(standard_edges, inverted_edges, &cutParentId, &cutChildId);
@@ -525,8 +526,8 @@ int main(int argc, const char *argv[])
                 std::cerr << "SMC cut-tree step failed (could not sample weighted edge).\n";
                 break;
             }
-            TreeNode* p = findNodeById(workingTree, cutParentId);
-            TreeNode* c = findNodeById(workingTree, cutChildId);
+            TreeNode* p = clonedNodes.count(cutParentId) ? clonedNodes[cutParentId] : nullptr;
+            TreeNode* c = clonedNodes.count(cutChildId) ? clonedNodes[cutChildId] : nullptr;
             if (!p || !c || c->parent != p) {
                 freeTree(workingTree);
                 std::cerr << "SMC cut-tree step failed (sampled edge not found in tree).\n";
@@ -551,19 +552,19 @@ int main(int argc, const char *argv[])
                                             hop,
                                             &outcome,
                                             timer,
-                                            "smc_hop_events.csv");
+                                            nextNodeId,
+                                            hopEvents);
 
             for (const auto& evt : outcome.geneFluxEvents) {
                 geneFluxActive.push_back(evt);
             }
 
             if (!ok) {
-                std::ofstream hop_events("smc_hop_events.csv", std::ios::app);
-                if (hop_events.is_open()) {
+                if (hopEvents.is_open()) {
                     for (const auto& row : outcome.eventRows) {
-                        hop_events << timer << "," << row;
+                        hopEvents << timer << "," << row;
                     }
-                    hop_events << timer << ","
+                    hopEvents << timer << ","
                                << hop << ","
                                << currentX << ","
                                << "reattach_failed,"
@@ -668,10 +669,9 @@ int main(int argc, const char *argv[])
             }
 
             {
-                std::ofstream hoplog("smc_hop_trace.csv", std::ios::app);
-                if (hoplog.is_open()) {
-                    hoplog << std::setprecision(17);
-                    hoplog << timer << ","
+                if (hopTrace.is_open()) {
+                    hopTrace << std::setprecision(17);
+                    hopTrace << timer << ","
                            << hop << ","
                            << currentX << ","
                            << rawHopDelta << ","
@@ -684,12 +684,11 @@ int main(int argc, const char *argv[])
                 }
             }
             {
-                std::ofstream hop_events("smc_hop_events.csv", std::ios::app);
-                if (hop_events.is_open()) {
+                if (hopEvents.is_open()) {
                     for (const auto& row : outcome.eventRows) {
-                        hop_events << timer << "," << row;
+                        hopEvents << timer << "," << row;
                     }
-                    hop_events << timer << ","
+                    hopEvents << timer << ","
                                << hop << ","
                                << currentX << ","
                                << "hop_summary,"
@@ -723,6 +722,9 @@ int main(int argc, const char *argv[])
                 }
             }
         }
+
+        hopEvents.flush();
+        hopTrace.flush();
 
         if (writeAllDiagnostics) {
             writeTreeDOT(activeTree, "genetree_modified.dot");

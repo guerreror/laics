@@ -1,6 +1,7 @@
 #ifndef SIMULATE_SMC_H
 #define SIMULATE_SMC_H
 
+#include <fstream>
 #include <vector>
 #include <string>
 #include "treemod.h"
@@ -39,6 +40,7 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
                            int hopIndex,
                            SMCStepOutcome* outcome,
                            int runIndex,
-                           const std::string& eventLogPath);
+                           unsigned long& nextNodeId,
+                           std::ofstream& evlog);
 
 #endif
