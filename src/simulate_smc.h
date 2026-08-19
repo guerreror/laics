@@ -35,9 +35,11 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
                            double cutStartTime,
                            const Parameters::ParameterData& params,
                            const std::vector<std::vector<double>>& mig_prob,
+                           const std::vector<std::pair<double, std::vector<std::vector<double>>>>& mig_schedule,
                            double currentHopX,
                            int hopIndex,
                            SMCStepOutcome* outcome,
+                           int runIndex,
                            const std::string& eventLogPath);
 
 #endif

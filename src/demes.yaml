@@ -16,28 +16,135 @@
 #         end_time: 0
         
         
-description: two pops of size 10000 split from a single ancestor at 10000 generations; migration explicitly set to zero
+# description: two pops of size 10000 split from a single ancestor at 10000 generations; migration explicitly set to zero
+
+
+# -----------------------------------------------------------------
+
+# description: two pops of size 10000 split from a single ancestor at 10000 generations; migration explicitly set to zero
+# time_units: generations
+
+# demes:
+#   # Ancestral deme
+#   - name: root
+#     epochs:
+#       - start_size: 8888
+#         end_time: 10000
+
+#   - name: pop0
+#     ancestors: [root]
+#     epochs:
+#       - start_size: 87000
+#         end_time: 0
+
+#   - name: pop1
+#     ancestors: [root]
+#     epochs:
+#       - start_size: 6666
+#         end_time: 0
+
+# migrations:
+#   - demes: [pop0, pop1]
+#     rate: 0.0
+
+# -----------------------------------------------------------------
+
+
+description: validation setup
 time_units: generations
 
 demes:
-  # Ancestral deme
   - name: root
     epochs:
-      - start_size: 8888
-        end_time: 10000
+      - start_size: 80000
+        end_time: 35000
 
-  - name: pop0
+  - name: anc05
+    start_time: 35000
     ancestors: [root]
     epochs:
-      - start_size: 87000
+      - start_size: 65000
+        end_time: 10000
+
+  - name: anc1324
+    start_time: 35000
+    ancestors: [root]
+    epochs:
+      - start_size: 70000
+        end_time: 22000
+
+  - name: anc13
+    start_time: 22000
+    ancestors: [anc1324]
+    epochs:
+      - start_size: 52000
+        end_time: 12000
+
+  - name: anc24
+    start_time: 22000
+    ancestors: [anc1324]
+    epochs:
+      - start_size: 48000
+        end_time: 18000
+      - start_size: 56000
+        end_time: 14000
+
+  - name: pop0
+    start_time: 10000
+    ancestors: [anc05]
+    epochs:
+      - start_size: 42000
+        end_time: 0
+
+  - name: pop5
+    start_time: 10000
+    ancestors: [anc05]
+    epochs:
+      - start_size: 46000
         end_time: 0
 
   - name: pop1
-    ancestors: [root]
+    start_time: 12000
+    ancestors: [anc13]
     epochs:
-      - start_size: 6666
+      - start_size: 30000
+        end_time: 4000
+      - start_size: 38000
+        end_time: 0
+
+  - name: pop3
+    start_time: 12000
+    ancestors: [anc13]
+    epochs:
+      - start_size: 34000
+        end_time: 8000
+      - start_size: 40000
+        end_time: 0
+
+  - name: pop2
+    start_time: 14000
+    ancestors: [anc24]
+    epochs:
+      - start_size: 32000
+        end_time: 6000
+      - start_size: 39000
+        end_time: 0
+
+  - name: pop4
+    start_time: 14000
+    ancestors: [anc24]
+    epochs:
+      - start_size: 36000
+        end_time: 2000
+      - start_size: 43000
         end_time: 0
 
 migrations:
+  - demes: [pop0, pop5]
+    rate: 0.0005
+  - demes: [pop1, pop3]
+    rate: 0.0008
+  - demes: [pop2, pop4]
+    rate: 0.0006
   - demes: [pop0, pop1]
-    rate: 0.0
+    rate: 0.0004

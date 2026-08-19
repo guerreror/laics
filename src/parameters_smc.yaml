@@ -5,6 +5,7 @@ NumberOfReplicates: "1000"
 KingmanCoal: "1"
 DriftSimulation: "0"
 MSOutput: "0"
+<<<<<<< HEAD
 
 # One value per present-day population in demes.yaml.
 InversionFrequency: "0 0"
@@ -30,3 +31,30 @@ DoubleRecombinationRate: "0"
 
 # Lowercase key is retained for compatibility with the existing launcher.
 outputRoot: "/share/guerrerolab/baturne5/laics_output/diag/"
+=======
+InversionFrequency: "0.1 0.2 0.3 0.4 0.2 0.1"
+InversionAge: "40000"
+BasesPerMorgan: "1e8"
+InversionRange: "0 5000000"
+RandomSample: "0"
+Samples:
+  pop0: "2 2"
+  pop1: "2 2"
+  pop2: "2 2"
+  pop3: "2 2"
+  pop4: "2 2"
+  pop5: "2 2"
+AncestorFrequencies:
+  anc05: "0.15"
+  anc13: "0.25"
+  anc24: "0.35"
+  anc1324: "0.45"
+  root: "0.55"
+SMC: "1"
+Verbose: "0"
+TargetSNPs: ""
+CSVSnapshots: "0"
+BinarySnapshots: "0"
+GeneConversionRate: "0.00002"
+DoubleRecombinationRate: "0.0002"
+>>>>>>> origin/speciation
