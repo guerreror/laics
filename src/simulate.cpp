@@ -268,13 +268,6 @@ void World::speciation() {
     const auto oldCluster = cluster;
     const auto oldFreq    = worldData->freq;
 
-    // Debug (before we erase B)
-    size_t beforeA = popNcarriers(A);
-    size_t beforeB = popNcarriers(B);
-    // std::cerr << "[Speciation] BEFORE merge: pop "
-    //           << A << "=" << beforeA << " carriers, pop "
-    //           << B << "=" << beforeB << " carriers\n";
-
     worldData->popSize[A] = R;
     worldData->popSize.erase(worldData->popSize.begin() + B);
 
@@ -293,23 +286,7 @@ void World::speciation() {
         else if (p  > (int)B) chr->setPopulation(p - 1);
     }
 
-    // --- DEBUG: clusters BEFORE rebuild (map still reflects old layout) ---
-    // std::cerr << "Clusters BEFORE rebuild:\n";
-    // for (auto &kv : cluster) {
-    //     std::cerr << "  pop=" << kv.first.pop
-    //               << ", inv=" << kv.first.inversion
-    //               << " -> cid=" << kv.second << "\n";
-    // }
-
     rebuildClustersAndCarriers();
-
-    // // --- DEBUG: clusters AFTER rebuild ---
-    // std::cerr << "Clusters AFTER rebuild:\n";
-    // for (auto &kv : cluster) {
-    //     std::cerr << "  pop=" << kv.first.pop
-    //               << ", inv=" << kv.first.inversion
-    //               << " -> cid=" << kv.second << "\n";
-    // }
 
 
     std::vector<double> newFreqVec(worldData->nClust, 0.0);
@@ -333,16 +310,6 @@ void World::speciation() {
 
     worldData->nPops = worldData->popSize.size();
 
-    size_t afterA = popNcarriers(newA);
-    size_t afterB = (B < worldData->nPops) ? popNcarriers(B) : 0;
-
-    // std::cerr << "[Speciation] AFTER  merge: pop "
-    //           << newA << "=" << afterA << " carriers, pop "
-    //           << B   << "=" << afterB << " carriers\n";
-
-    // std::cerr << "[Speciation] pop " << B << "→" << newA << "; popSizes = ";
-    // for (auto s : worldData->popSize) std::cerr << s << " ";
-    // std::cerr << " ; nClust=" << worldData->nClust << "\n";
 }
 
 

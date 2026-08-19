@@ -405,11 +405,17 @@ int main(int argc, const char *argv[])
             hop_events << "run,hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
         }
     }
-    std::ofstream treeSnapshotsCSV("smc_tree_snapshots.csv");
+    std::ofstream treeSnapshotsCSV;
+    if (params.paramData->csvSnapshots) {
+        treeSnapshotsCSV.open("smc_tree_snapshots.csv");
+    }
     if (treeSnapshotsCSV.is_open()) {
         treeSnapshotsCSV << "run,hop,x_start,x_end,node_id,parent_id,time,pop,inversion\n";
     }
-    std::ofstream treeSnapshotsBin("smc_tree_snapshots.bin", std::ios::binary);
+    std::ofstream treeSnapshotsBin;
+    if (params.paramData->binarySnapshots) {
+        treeSnapshotsBin.open("smc_tree_snapshots.bin", std::ios::binary);
+    }
     if (treeSnapshotsBin.is_open()) {
         treeSnapshotsBin.write("SMCTREE1", 8);
     }
@@ -540,10 +546,12 @@ int main(int argc, const char *argv[])
                                             cutStartTime,
                                             *params.paramData,
                                             mig_prob_cut,
+                                            schedule,
                                             currentX,
                                             hop,
                                             &outcome,
-                                            "");
+                                            timer,
+                                            "smc_hop_events.csv");
 
             for (const auto& evt : outcome.geneFluxEvents) {
                 geneFluxActive.push_back(evt);

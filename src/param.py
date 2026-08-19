@@ -12,6 +12,7 @@ from collections import defaultdict, deque
 # ---------- File paths ----------
 DEMES_YAML      = "src/demes.yaml"
 MIGRATION_JSON  = "src/migration_matrices.json"
+ORIGINAL_MIGRATION_JSON = "src/original_migration_matrices.json"
 EXECUTABLE_ARG  = "./executables/labp_v21"
 EXECUTABLE_SMC  = "./executables/labp_smc"
 
@@ -51,6 +52,8 @@ parameters = {
     "target_snp":   "",
     "gc":           "1.0",
     "dr":           "1.0",
+    "csvSnapshots": "0",
+    "binarySnapshots": "1",
 }
 
 YAML_KEY_ALIASES = {
@@ -74,6 +77,8 @@ YAML_KEY_ALIASES = {
     "TargetSNPs": "target_snp",
     "GeneConversionRate": "gc",
     "DoubleRecombinationRate": "dr",
+    "CSVSnapshots": "csvSnapshots",
+    "BinarySnapshots": "binarySnapshots",
 }
 
 DISPLAY_KEY_NAMES = {
@@ -101,6 +106,8 @@ DISPLAY_KEY_NAMES = {
     "target_snp": "TargetSNPs",
     "gc": "GeneConversionRate",
     "dr": "DoubleRecombinationRate",
+    "csvSnapshots": "CSVSnapshots",
+    "binarySnapshots": "BinarySnapshots",
 }
 
 # ---------- Helpers for demes ----------
@@ -206,8 +213,12 @@ def render_tree_ascii(graph, only_these_leaves=None):
     dfs(root)
     return "\n".join(lines)
 
-def write_migration_matrices_from_demes(graph, out_json=MIGRATION_JSON):
+def write_migration_matrices_from_demes(graph, leaf_order, spec_events,
+                                        out_json=MIGRATION_JSON,
+                                        original_json=ORIGINAL_MIGRATION_JSON):
     matrices, times = graph.migration_matrices()
+    deme_order = [d.name for d in graph.demes]
+    deme_index = {name: i for i, name in enumerate(deme_order)}
 
     def adjust_diagonal(matrix):
         adjusted = []
@@ -218,13 +229,86 @@ def write_migration_matrices_from_demes(graph, out_json=MIGRATION_JSON):
             adjusted.append([round(x, 5) for x in out_row])
         return adjusted
 
-    pairs = sorted(zip(times, matrices), key=lambda x: x[0])
-    payload = {str(int(t)): adjust_diagonal(m) for t, m in pairs}
+    original_payload = {
+        "deme_order": deme_order,
+        "matrices": {
+            str(int(t)): adjust_diagonal(matrix)
+            for t, matrix in sorted(zip(times, matrices), key=lambda x: x[0])
+        },
+    }
+    with open(original_json, "w") as f:
+        json.dump(original_payload, f, indent=4)
+
+    with open(original_json, "r") as f:
+        original_payload = json.load(f)
+
+    pairs = [(float(t), matrix) for t, matrix in original_payload["matrices"].items()]
+    pairs.sort(key=lambda x: x[0])
+    spec_by_time = defaultdict(list)
+    for A, B, T, _, _ in spec_events:
+        spec_by_time[T].append((int(A), int(B)))
+    spec_times = sorted(spec_by_time)
+    next_spec_idx = 0
+
+    children = build_children_map(graph)
+    by_name = {d.name: d for d in graph.demes}
+    leafset = set(leaf_order)
+    active_groups = [[name] for name in leaf_order]
+    active_names = list(leaf_order)
+
+    def parent_for_merge(A, B, T):
+        merged = set(active_groups[A]) | set(active_groups[B])
+        for parent, kids in children.items():
+            if abs(min(by_name[ch].start_time for ch in kids) - T) > 1e-9:
+                continue
+            if set(leaves_under(parent, children, leafset)) == merged:
+                return parent
+        return active_names[A]
+
+    def apply_speciation_until(t):
+        nonlocal next_spec_idx
+        while next_spec_idx < len(spec_times):
+            T = spec_times[next_spec_idx]
+            if T > t + 1e-9:
+                break
+            for A, B in spec_by_time[T]:
+                if A < len(active_groups) and B < len(active_groups):
+                    active_names[A] = parent_for_merge(A, B, T)
+                    active_groups[A].extend(active_groups[B])
+                    del active_groups[B]
+                    del active_names[B]
+            next_spec_idx += 1
+
+    def source_matrix_at(t):
+        chosen = pairs[0][1]
+        for mt, mat in pairs:
+            if mt <= t + 1e-9:
+                chosen = mat
+            else:
+                break
+        return chosen
+
+    payload = {}
+    output_times = sorted(set(list(times) + [ev[2] for ev in spec_events]))
+    for t in output_times:
+        apply_speciation_until(t)
+        src = source_matrix_at(t)
+        remapped = []
+        for rn in active_names:
+            row = []
+            for cn in active_names:
+                if rn in deme_index and cn in deme_index:
+                    row.append(float(src[deme_index[rn]][deme_index[cn]]))
+                else:
+                    row.append(0.0)
+            remapped.append(row)
+        payload[str(int(t))] = adjust_diagonal(remapped)
 
     with open(out_json, "w") as f:
         json.dump(payload, f, indent=4)
 
-    print(f"\n\nWrote {out_json} file with matrices at times: {list(payload.keys())}")
+    print(f"\n\nWrote {original_json} file with original demes-order matrices at times: {list(original_payload['matrices'].keys())}")
+    print(f"Wrote {out_json} file with active/remapped matrices at times: {list(payload.keys())}")
 
 # ---------- Speciation (sizes + events) ----------
 def build_speciation_from_demes(graph, ancestor_freqs=None, default_F=0.2):
@@ -283,18 +367,12 @@ def build_speciation_from_demes(graph, ancestor_freqs=None, default_F=0.2):
         R = ancestor_size_at(by_name[parent], T)
         F_parent = get_parent_F(parent)
 
-        child_group_idxs = []
-        for ch, under in child_sets:
-            gi = find_group_idx(under[0])
-            child_group_idxs.append((gi, ch, under))
+        child_sets.sort(key=lambda x: find_group_idx(x[1][0]))
+        sink_child, sink_under = child_sets[0]
 
-        child_group_idxs.sort(key=lambda x: x[0])
-        sink_idx = child_group_idxs[0][0]
-        sink_child = child_group_idxs[0][1]
-
-        for gi, ch, under in child_group_idxs[1:]:
-            A = sink_idx
-            B = gi
+        for ch, under in child_sets[1:]:
+            A = find_group_idx(sink_under[0])
+            B = find_group_idx(under[0])
             events.append((A, B, T, F_parent, R))
             plan_log.append(
                 f"t={fmt_time(T)}: merge group {B} ({ch}:{under}) → group {A} ({sink_child}); F={F_parent:g}, R={R}"
@@ -433,12 +511,6 @@ except Exception as e:
     sys.exit(1)
 
 try:
-    write_migration_matrices_from_demes(graph)
-except Exception as e:
-    print(f"Error writing {MIGRATION_JSON}: {e}", file=sys.stderr)
-    sys.exit(1)
-
-try:
     pop_sizes_str, speciation_str, debug_info = build_speciation_from_demes(
         graph,
         ancestor_freqs=ancestor_freqs,
@@ -448,6 +520,12 @@ try:
     parameters["speciation"] = speciation_str
 except (NotImplementedError, ValueError) as e:
     print(f"[speciation parser] {e}", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    write_migration_matrices_from_demes(graph, debug_info["leaf_order"], debug_info["events"])
+except Exception as e:
+    print(f"Error writing {MIGRATION_JSON}: {e}", file=sys.stderr)
     sys.exit(1)
 
 demog_str, demog_dbg = build_demography_from_demes_full(
@@ -567,7 +645,14 @@ args_list = (
     per_pop_strings
 )
 if smc_flag == "1":
-    args_list += [parameters["verbose"], parameters["target_snp"], parameters["gc"], parameters["dr"]]
+    args_list += [
+        parameters["verbose"],
+        parameters["target_snp"],
+        parameters["gc"],
+        parameters["dr"],
+        parameters["csvSnapshots"],
+        parameters["binarySnapshots"],
+    ]
 
 try:
     proc = subprocess.Popen(

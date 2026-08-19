@@ -25,13 +25,12 @@ using boost::math::binomial_coefficient;
 using std::map;
 using std::vector;
 
-static const double SMC_DEBUG_MIGRATION_BOOST = 1.0;
-
 static double triangleHeightAtX_SMC(double x, const Segment& range, double peakHeight);
 static bool canCoalesceByContext_SMC(const TreeNode* a, const TreeNode* b);
 
 static void recordEventRow_SMC(SMCStepOutcome* outcome,
                                std::ofstream& evlog,
+                               int runIndex,
                                int hopIndex,
                                double currentHopX,
                                const std::string& eventName,
@@ -39,11 +38,10 @@ static void recordEventRow_SMC(SMCStepOutcome* outcome,
     std::ostringstream row;
     row << hopIndex << "," << currentHopX << "," << eventName << ","
         << eventTime << ",,,\n";
-    if (outcome) {
-        outcome->eventRows.push_back(row.str());
-    }
     if (evlog.is_open()) {
-        evlog << row.str();
+        evlog << runIndex << "," << row.str();
+    } else if (outcome) {
+        outcome->eventRows.push_back(row.str());
     }
 }
 
@@ -71,7 +69,7 @@ static double computeTotalM_SMC(TreeNode* cutRoot,
                                 const std::vector<std::vector<double>>& mig_prob) {
     if (!cutRoot) return 0.0;
     const unsigned int pop = cutRoot->context.pop;
-    const unsigned int nPops = params.popSizeVec.size();
+    const unsigned int nPops = static_cast<unsigned int>(mig_prob.size());
     if (pop >= nPops) return 0.0;
 
     double b_mig_total = 0.0;
@@ -79,6 +77,31 @@ static double computeTotalM_SMC(TreeNode* cutRoot,
         if (l != pop) b_mig_total += mig_prob.at(pop).at(l);
     }
     return b_mig_total;
+}
+
+static const std::vector<std::vector<double>>& migrationMatrixAtTime_SMC(
+    const std::vector<std::pair<double, std::vector<std::vector<double>>>>& schedule,
+    const std::vector<std::vector<double>>& fallback,
+    double t) {
+    const std::vector<std::vector<double>>* active = &fallback;
+    for (const auto& item : schedule) {
+        if (item.first <= t + 1e-9) active = &item.second;
+        else break;
+    }
+    return *active;
+}
+
+static bool nextMigrationMatrixTimeAfter_SMC(
+    const std::vector<std::pair<double, std::vector<std::vector<double>>>>& schedule,
+    double currentTime,
+    double& nextTime) {
+    for (const auto& item : schedule) {
+        if (item.first > currentTime + 1e-9) {
+            nextTime = item.first;
+            return true;
+        }
+    }
+    return false;
 }
 
 static double computeTotalC_SMC(const Parameters::ParameterData& params,
@@ -107,6 +130,9 @@ static double computeTotalG_SMC(const TreeNode* cutRoot,
                                 double t,
                                 double currentHopX) {
     if (!cutRoot) return 0.0;
+    if (params.inv_age > 0 && t + 1e-9 >= static_cast<double>(params.inv_age)) {
+        return 0.0;
+    }
     const unsigned int pop = cutRoot->context.pop;
     const SMCActiveState state = activeStateAtTime_SMC(params, t);
     if (pop >= state.invFreqs.size()) return 0.0;
@@ -123,7 +149,7 @@ static double computeTotalG_SMC(const TreeNode* cutRoot,
 }
 
 static double drawGeneFluxSegmentLength_SMC(double /*currentHopX*/) {
-    return 0.01;
+    return 200.0;
 }
 
 static double triangleHeightAtX_SMC(double x, const Segment& range, double peakHeight) {
@@ -189,7 +215,9 @@ static unsigned int pickMigrationDest_SMC(unsigned int fromPop,
     for (unsigned int i = 0; i < row.size(); ++i) {
         if (i == fromPop) continue;
         cum += row[i];
-        if (roll <= cum) return i;
+        if (roll <= cum) {
+            return i;
+        }
     }
     return fromPop;
 }
@@ -260,6 +288,13 @@ static bool nextModelEpochAfter_SMC(const Parameters::ParameterData& params,
     if (params.inv_age > 0) {
         consider(static_cast<double>(params.inv_age));
     }
+    if (!params.demography.empty() && params.demography[0] == 1) {
+        const size_t nPops = params.popSizeVec.size();
+        const size_t stride = 1 + nPops;
+        for (size_t i = 1; i + nPops < params.demography.size(); i += stride) {
+            consider(params.demography[i]);
+        }
+    }
     if (!params.speciation.empty() && params.speciation[0] == 1) {
         for (size_t i = 1; i + 4 < params.speciation.size(); i += 5) {
             consider(params.speciation[i + 2]);
@@ -277,8 +312,40 @@ static void applyEpochEventsToLineageAtTime_SMC(TreeNode*& lineage,
                                                 const Parameters::ParameterData& params,
                                                 unsigned long& nextId) {
     if (!lineage) return;
-    const Context newCtx = contextAfterEpochEvents_SMC(lineage->context, params, t);
+    Context newCtx = lineage->context;
+    bool addEventNode = false;
+
+    if (!params.speciation.empty() && params.speciation[0] == 1) {
+        const double eps = 1e-9;
+        for (size_t i = 1; i + 4 < params.speciation.size(); i += 5) {
+            const unsigned int sink = static_cast<unsigned int>(params.speciation[i]);
+            const unsigned int source = static_cast<unsigned int>(params.speciation[i + 1]);
+            const double eventTime = params.speciation[i + 2];
+            if (t + eps < eventTime) continue;
+
+            const unsigned int newSink = (sink > source) ? (sink - 1) : sink;
+            if (newCtx.pop == source) {
+                newCtx.pop = newSink;
+                addEventNode = true;
+            } else if (newCtx.pop > source) {
+                newCtx.pop -= 1; // Renumbering only; not a biological event node.
+            }
+        }
+    }
+
+    const double eps = 1e-9;
+    if (params.inv_age > 0 && t + eps >= static_cast<double>(params.inv_age) &&
+        newCtx.inversion == 1) {
+        newCtx.pop = 0;
+        newCtx.inversion = 0;
+        addEventNode = true;
+    }
+
     if (newCtx == lineage->context) {
+        return;
+    }
+    if (!addEventNode) {
+        lineage->context = newCtx;
         return;
     }
 
@@ -418,14 +485,16 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
                                           double cutLineageTime,
                                           const Parameters::ParameterData& params,
                                           const std::vector<std::vector<double>>& mig_prob,
+                                          const std::vector<std::pair<double, std::vector<std::vector<double>>>>& mig_schedule,
                                           double currentHopX,
                                           SMCStepOutcome* outcome,
                                           std::ofstream& evlog,
+                                          int runIndex,
                                           int hopIndex,
                                           double root_time) {
     if (!mainRoot || !cutRoot) {
         std::cerr << "SMC fallback failed: missing main or cut lineage.\n";
-        recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX,
+        recordEventRow_SMC(outcome, evlog, runIndex, hopIndex, currentHopX,
                            "fallback_missing_lineage", cutLineageTime);
         return false;
     }
@@ -444,8 +513,9 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
         std::vector<double> totalG_i(lineages.size(), 0.0);
         double totalM = 0.0;
         double totalG = 0.0;
+        const auto& activeMig = migrationMatrixAtTime_SMC(mig_schedule, mig_prob, currentTime);
         for (size_t i = 0; i < lineages.size(); ++i) {
-            totalM_i[i] = computeTotalM_SMC(lineages[i], params, mig_prob) * SMC_DEBUG_MIGRATION_BOOST;
+            totalM_i[i] = computeTotalM_SMC(lineages[i], params, activeMig);
             totalG_i[i] = computeTotalG_SMC(lineages[i], params, currentTime, currentHopX);
             totalM += totalM_i[i];
             totalG += totalG_i[i];
@@ -462,7 +532,7 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
                 continue;
             }
             std::cerr << "SMC fallback failed: total event rate is zero.\n";
-            recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX,
+            recordEventRow_SMC(outcome, evlog, runIndex, hopIndex, currentHopX,
                                "fallback_rate_zero", currentTime);
             return false;
         }
@@ -477,6 +547,11 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
             for (auto*& lineage : lineages) {
                 applyEpochEventsToLineageAtTime_SMC(lineage, currentTime, params, nextId);
             }
+            continue;
+        }
+        if (nextMigrationMatrixTimeAfter_SMC(mig_schedule, startTime, nextEpoch) &&
+            event_time >= nextEpoch) {
+            currentTime = nextEpoch;
             continue;
         }
 
@@ -511,7 +586,7 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
                            << "_i" << (lineages.size() > 0 ? lineages[0]->context.inversion : 9999)
                            << "_cut_p" << (lineages.size() > 1 ? lineages[1]->context.pop : 9999)
                            << "_i" << (lineages.size() > 1 ? lineages[1]->context.inversion : 9999);
-                    recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX,
+                    recordEventRow_SMC(outcome, evlog, runIndex, hopIndex, currentHopX,
                                        reason.str(), currentTime);
                     return false;
                 }
@@ -533,7 +608,7 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
             lineages.erase(lineages.begin() + static_cast<long>(j));
             lineages.erase(lineages.begin() + static_cast<long>(i));
             lineages.push_back(coal);
-            recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX, "coalescence_fallback", event_time);
+            recordEventRow_SMC(outcome, evlog, runIndex, hopIndex, currentHopX, "coalescence_fallback", event_time);
             continue;
         }
 
@@ -542,10 +617,10 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
         for (size_t i = 0; i < lineages.size(); ++i) {
             if (rem < totalM_i[i]) {
                 Context newCtx = lineages[i]->context;
-                newCtx.pop = pickMigrationDest_SMC(newCtx.pop, mig_prob);
+                newCtx.pop = pickMigrationDest_SMC(newCtx.pop, activeMig);
                 TreeNode* nr = addUnaryAbove(lineages[i], nextId++, event_time, newCtx);
                 if (nr && nr->parent == nullptr) lineages[i] = nr;
-                recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX, "migration_fallback", event_time);
+                recordEventRow_SMC(outcome, evlog, runIndex, hopIndex, currentHopX, "migration_fallback", event_time);
                 handled = true;
                 break;
             }
@@ -564,7 +639,7 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
                                                                     params);
                     outcome->geneFluxEvents.push_back(evt);
                 }
-                recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX,
+                recordEventRow_SMC(outcome, evlog, runIndex, hopIndex, currentHopX,
                                    "gene_flux_fallback_" + geneFluxType, event_time);
                 handled = true;
                 break;
@@ -573,7 +648,7 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
         }
         if (!handled) {
             std::cerr << "SMC fallback failed: sampled event was outside all rate channels.\n";
-            recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX,
+            recordEventRow_SMC(outcome, evlog, runIndex, hopIndex, currentHopX,
                                "fallback_unhandled_rate_channel", currentTime);
             return false;
         }
@@ -593,9 +668,11 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
                            double cutStartTime,
                            const Parameters::ParameterData& params,
                            const std::vector<std::vector<double>>& mig_prob,
+                           const std::vector<std::pair<double, std::vector<std::vector<double>>>>& mig_schedule,
                            double currentHopX,
                            int hopIndex,
                            SMCStepOutcome* outcome,
+                           int runIndex,
                            const std::string& eventLogPath) {
     if (!mainRoot || !cutRoot) {
         std::cerr << "SMC reattachment failed: missing main or cut lineage.\n";
@@ -628,7 +705,8 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
 
         SMCEpochs_SMC epochs = buildEpochBreaks_SMC(mainRoot, lineageTime);
 
-        double totalM = computeTotalM_SMC(cutRoot, params, mig_prob) * SMC_DEBUG_MIGRATION_BOOST;
+        const auto& activeMig = migrationMatrixAtTime_SMC(mig_schedule, mig_prob, lineageTime);
+        double totalM = computeTotalM_SMC(cutRoot, params, activeMig);
         double totalC = computeTotalC_SMC(params, lineageTime, cutRoot->context.pop);
         double totalG = computeTotalG_SMC(cutRoot, params, lineageTime, currentHopX);
         double Rate = totalM + totalC + totalG;
@@ -641,7 +719,7 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
                 continue;
             }
             std::cerr << "SMC reattachment failed: total event rate is zero.\n";
-            recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX,
+            recordEventRow_SMC(outcome, evlog, runIndex, hopIndex, currentHopX,
                                "normal_rate_zero", lineageTime);
             return false;
         }
@@ -665,6 +743,13 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
             nextEpoch = modelEpoch;
             crossedEpoch = true;
         }
+        double migEpoch = 0.0;
+        if (nextMigrationMatrixTimeAfter_SMC(mig_schedule, lineageTime, migEpoch) &&
+            event_time >= migEpoch &&
+            (!crossedEpoch || migEpoch < nextEpoch)) {
+            nextEpoch = migEpoch;
+            crossedEpoch = true;
+        }
         if (crossedEpoch && nextEpoch < root_time) {
             if (params.inv_age > 0 &&
                 std::abs(nextEpoch - static_cast<double>(params.inv_age)) <= 1e-9) {
@@ -672,7 +757,7 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
                 bool cutCollapsed = false;
                 if (collapseInversionAge_SMC(mainRoot, cutRoot, nextEpoch, params, nextId, cutCollapsed) &&
                     cutCollapsed) {
-                    recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX,
+                    recordEventRow_SMC(outcome, evlog, runIndex, hopIndex, currentHopX,
                                        "inversion_age_coalescence", nextEpoch);
                     if (outcome) {
                         outcome->coalesced = true;
@@ -689,11 +774,11 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
         }
 
         if (event_time >= root_time) {
-            if (resolveAboveRootByMiniSMC_SMC(mainRoot, cutRoot, lineageTime, params, mig_prob, currentHopX, outcome, evlog, hopIndex, root_time)) {
+            if (resolveAboveRootByMiniSMC_SMC(mainRoot, cutRoot, lineageTime, params, mig_prob, mig_schedule, currentHopX, outcome, evlog, runIndex, hopIndex, root_time)) {
                 return true;
             }
             std::cerr << "SMC reattachment failed: above-root simulation did not coalesce.\n";
-            recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX,
+            recordEventRow_SMC(outcome, evlog, runIndex, hopIndex, currentHopX,
                                "above_root_fallback_failed", root_time);
             if (outcome) {
                 outcome->coalesced = false;
@@ -711,18 +796,18 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
         if (is_migration) {
             unsigned long nextId = std::max(getMaxId(mainRoot), getMaxId(cutRoot)) + 1;
             Context newCtx = cutRoot->context;
-            unsigned int dest = pickMigrationDest_SMC(newCtx.pop, mig_prob);
+            unsigned int dest = pickMigrationDest_SMC(newCtx.pop, activeMig);
             newCtx.pop = dest;
             TreeNode* newRoot = addUnaryAbove(cutRoot, nextId, event_time, newCtx);
             if (newRoot->parent == nullptr) {
                 cutRoot = newRoot;
             }
             lineageTime = event_time;
-            recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX, "migration", event_time);
+            recordEventRow_SMC(outcome, evlog, runIndex, hopIndex, currentHopX, "migration", event_time);
         } else if (is_coalescence) {
             unsigned long nextId = std::max(getMaxId(mainRoot), getMaxId(cutRoot)) + 1;
             if (reattachAtTimeWithEpochContext_SMC(mainRoot, cutRoot, event_time, cutRoot->context, params, nextId)) {
-                recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX, "coalescence", event_time);
+                recordEventRow_SMC(outcome, evlog, runIndex, hopIndex, currentHopX, "coalescence", event_time);
                 if (outcome) {
                     outcome->coalesced = true;
                     outcome->hitRootLimit = false;
@@ -753,7 +838,7 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
                 outcome->geneFluxEvents.push_back(evt);
             }
             nextGeneFluxStartX = evt.endX;
-            recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX,
+            recordEventRow_SMC(outcome, evlog, runIndex, hopIndex, currentHopX,
                                "gene_flux_" + geneFluxType, event_time);
         }
     }

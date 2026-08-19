@@ -71,6 +71,8 @@
      std::vector<double> targetSNPs;
      double gcRate;
      double drRate;
+     bool csvSnapshots;
+     bool binarySnapshots;
      double timestamp;
      unsigned long totalPopSize;
  };
