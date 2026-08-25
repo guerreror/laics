@@ -640,11 +640,17 @@ int main(int argc, const char *argv[])
         }
     };
 
-    std::ofstream hopTrace("smc_hop_trace.csv");
+    const string hopTracePath = writeAllDiagnostics
+        ? pathJoin(output_dir, "smc_hop_trace.csv")
+        : "smc_hop_trace.csv";
+    const string hopEventsPath = writeAllDiagnostics
+        ? pathJoin(output_dir, "smc_hop_events.csv")
+        : "smc_hop_events.csv";
+    std::ofstream hopTrace(hopTracePath);
     if (hopTrace.is_open()) {
         hopTrace << "run,hop,current_x,raw_delta_x,used_delta_x,next_x,rho,Li_sum,Ls_sum,root_time\n";
     }
-    std::ofstream hopEvents("smc_hop_events.csv");
+    std::ofstream hopEvents(hopEventsPath);
     if (hopEvents.is_open()) {
         hopEvents << "run,hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
     }
@@ -741,39 +747,6 @@ int main(int argc, const char *argv[])
                 writeTreeArtifacts(activeTree, targetBase.str());
             }
         }
-        bool hopTraceHeaderWritten = false;
-        bool hopEventsHeaderWritten = false;
-        if (writeAllDiagnostics) {
-            std::ofstream hoplog(pathJoin(output_dir, "smc_hop_trace.csv"));
-            if (hoplog.is_open()) {
-                hoplog << "hop,current_x,raw_delta_x,used_delta_x,next_x,rho,Li_sum,Ls_sum,root_time\n";
-                hopTraceHeaderWritten = true;
-            }
-            std::ofstream hop_events(pathJoin(output_dir, "smc_hop_events.csv"));
-            if (hop_events.is_open()) {
-                hop_events << "hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
-                hopEventsHeaderWritten = true;
-            }
-        }
-
-        auto ensureHopTraceHeader = [&]() {
-            if (hopTraceHeaderWritten) return;
-            std::ofstream hoplog(pathJoin(output_dir, "smc_hop_trace.csv"));
-            if (hoplog.is_open()) {
-                hoplog << "hop,current_x,raw_delta_x,used_delta_x,next_x,rho,Li_sum,Ls_sum\n";
-                hopTraceHeaderWritten = true;
-            }
-        };
-
-        auto ensureHopEventsHeader = [&]() {
-            if (hopEventsHeaderWritten) return;
-            std::ofstream hop_events(pathJoin(output_dir, "smc_hop_events.csv"));
-            if (hop_events.is_open()) {
-                hop_events << "hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
-                hopEventsHeaderWritten = true;
-            }
-        };
-
         int hop = 0;
         while (currentX < params.paramData->smcRange.R) {
             vector<EdgeWeight> standard_edges;
@@ -840,7 +813,7 @@ int main(int argc, const char *argv[])
                                             hop,
                                             &outcome,
                                             timer,
-                                            writeAllDiagnostics ? pathJoin(output_dir, "smc_hop_events.csv") : nextNodeId,
+                                            nextNodeId,
                                             hopEvents);
 
             // Append every vertical rate calc during this hop
@@ -968,39 +941,31 @@ int main(int argc, const char *argv[])
                 }
             }
 
-            if (writeThisHop) {
-                ensureHopTraceHeader();
-                std::ofstream hoplog(pathJoin(output_dir, "smc_hop_trace.csv"), std::ios::app);
-                if (hoplog.is_open()) {
-                    hoplog << std::setprecision(17);
-                    hoplog << timer << ","
-                           << hop << ","
-                           << currentX << ","
-                           << rawHopDelta << ","
-                           << finalHopDelta << ","
-                           << nextX << ","
-                           << rho << ","
-                           << Li_sum << ","
-                           << Ls_sum << ","
-                           << (activeTree ? activeTree->time : 0.0) << "\n";
-                }
+            if (hopTrace.is_open()) {
+                hopTrace << std::setprecision(17);
+                hopTrace << timer << ","
+                         << hop << ","
+                         << currentX << ","
+                         << rawHopDelta << ","
+                         << finalHopDelta << ","
+                         << nextX << ","
+                         << rho << ","
+                         << Li_sum << ","
+                         << Ls_sum << ","
+                         << (activeTree ? activeTree->time : 0.0) << "\n";
             }
-            if (writeThisHop) {
-                ensureHopEventsHeader();
-                std::ofstream hop_events(pathJoin(output_dir, "smc_hop_events.csv"), std::ios::app);
-                if (hop_events.is_open()) {
-                    for (const auto& row : outcome.eventRows) {
-                        hopEvents << timer << "," << row;
-                    }
-                    hopEvents << timer << ","
-                               << hop << ","
-                               << currentX << ","
-                               << "hop_summary,"
-                               << ","
-                               << rawHopDelta << ","
-                               << finalHopDelta << ","
-                               << nextX << "\n";
+            if (hopEvents.is_open()) {
+                for (const auto& row : outcome.eventRows) {
+                    hopEvents << timer << "," << row;
                 }
+                hopEvents << timer << ","
+                          << hop << ","
+                          << currentX << ","
+                          << "hop_summary,"
+                          << ","
+                          << rawHopDelta << ","
+                          << finalHopDelta << ","
+                          << nextX << "\n";
             }
             currentX = nextX;
             ++hop;

@@ -811,7 +811,8 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
             if (resolveAboveRootByMiniSMC_SMC(mainRoot, cutRoot, lineageTime,
                                               params, mig_prob, standard_mig_schedule,
                                               inverted_mig_schedule, currentHopX,
-                                              outcome, evlog, runIndex, hopIndex, root_time)) {
+                                              outcome, evlog, runIndex, hopIndex,
+                                              nextNodeId, root_time)) {
                 return true;
             }
             std::cerr << "SMC reattachment failed: above-root simulation did not coalesce.\n";
