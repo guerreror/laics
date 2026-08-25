@@ -111,6 +111,23 @@ static vector<vector<double>> adaptMatrixForPops(const vector<vector<double>> &m
     }
     return m;
 }
+// Check if any migration events are present in the schedule
+static bool scheduleHasMigration(
+    const vector<pair<double, Matrix>>& schedule)
+{
+    for (const auto& item : schedule) {
+        const Matrix& matrix = item.second;
+        for (size_t i = 0; i < matrix.size(); ++i) {
+            for (size_t j = 0; j < matrix[i].size(); ++j) {
+                // If any off-diagonal entry is greater than zero, migration is present
+                if (i != j && matrix[i][j] > 0.0) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
 
 static double sampleHopDeltaFromRho(double rho)
 {
@@ -537,7 +554,52 @@ int main(int argc, const char *argv[])
     printProgress(0, static_cast<int>(nRuns), progressBucket);
 
     const std::string mig_json = "src/migration_matrices.json";
+    const std::string adjusted_standard_mig_json =
+        "src/adjusted_standard_migration_matrices.json";
+    const std::string adjusted_inverted_mig_json =
+        "src/adjusted_inverted_migration_matrices.json";
     auto schedule = readMigrationSchedule(mig_json);
+    auto adjusted_standard_schedule =
+        readMigrationSchedule(adjusted_standard_mig_json);
+    auto adjusted_inverted_schedule =
+        readMigrationSchedule(adjusted_inverted_mig_json);
+
+    // Check if migration is enabled based on the schedule
+    bool migration_enabled = scheduleHasMigration(schedule);
+    if (schedule.empty()) {
+        for (double rate : params.paramData->migRate) {
+            if (rate > 0.0) {
+                migration_enabled = true;
+                break;
+            }
+        }
+    }
+    // Check if the required adjusted migration schedules are available
+    if (migration_enabled &&
+        (adjusted_standard_schedule.empty() || adjusted_inverted_schedule.empty())) {
+        std::cerr
+            << "Error: migration is enabled, but the required adjusted migration "
+            << "schedules are missing or empty. Run src/param.py to generate both "
+            << adjusted_standard_mig_json << " and "
+            << adjusted_inverted_mig_json << ".\n";
+        return EXIT_FAILURE;
+    }
+    if (migration_enabled &&
+        (adjusted_standard_schedule.front().first > 0.0 ||
+         adjusted_inverted_schedule.front().first > 0.0)) {
+        std::cerr
+            << "Error: adjusted migration schedules must contain a matrix active "
+            << "at generation 0. Regenerate "
+            << adjusted_standard_mig_json << " and "
+            << adjusted_inverted_mig_json << " with src/param.py.\n";
+        return EXIT_FAILURE;
+    }
+
+    // Horizontal SMC consumes the precomputed context-adjusted schedules.
+    // Raw migration rates are retained for the initial x0 simulation, which
+    // applies its existing q1/q2 conversion internally.
+    const auto& horizontal_standard_schedule = adjusted_standard_schedule;
+    const auto& horizontal_inverted_schedule = adjusted_inverted_schedule;
 
     vector<vector<double>> mig_prob;
     vector<vector<double>> mig_prob_cut;
@@ -561,7 +623,20 @@ int main(int argc, const char *argv[])
         if (mig_prob.empty()) {
             mig_prob = adaptMatrixForPops(schedule.front().second, params.paramData->popSizeVec.size());
         }
-        mig_prob_cut = mig_prob;
+        // For the cut lineage, use the adjusted migration schedule if available.
+        if (adjusted_standard_schedule.empty()) {
+            mig_prob_cut = mig_prob;
+        } else {
+
+            for (const auto& item : adjusted_standard_schedule) {
+                if (item.first <= g0) {
+                    mig_prob_cut = adaptMatrixForPops(
+                        item.second, params.paramData->popSizeVec.size());
+                } else {
+                    break;
+                }
+            }
+        }
     };
 
     {
@@ -758,7 +833,8 @@ int main(int argc, const char *argv[])
                                             cutStartTime,
                                             *params.paramData,
                                             mig_prob_cut,
-                                            schedule,
+                                            horizontal_standard_schedule,
+                                            horizontal_inverted_schedule,
                                             currentX,
                                             hop,
                                             &outcome,

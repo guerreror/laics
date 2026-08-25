@@ -1,34 +1,31 @@
 # SMC control ported from the former unified parameters.yaml.
 Seed: "0"
-NumberOfReplicates: "1000"
+NumberOfReplicates: "1"
 
 KingmanCoal: "1"
 DriftSimulation: "0"
 MSOutput: "0"
 
 # One value per present-day population in demes.yaml.
-InversionFrequency: "0.33 0.4 0.5"
+InversionFrequency: "0.1 0.3"
 AncestorFrequencies:
-  root: 0
-  anc12: 0
-InversionAge: "10000"
+  root: "0.6"
+InversionAge: "1300000"
 
 BasesPerMorgan: "1e8"
-InversionRange: "0 100000"
+InversionRange: "0 8000000"
 
 RandomSample: "0"
 Samples:
-  pop0: "0 1"  # one standard chromosome
-  pop1: "0 1"  # one standard chromosome
-  pop2: "0 1"
+  pop0: "0 10"  
+  pop1: "0 10"  
 
 SMC: "1"
 Verbose: "0"
 TargetSNPs: ""
 
-# No gene flux in this SNM control.
-GeneConversionRate: "0"
-DoubleRecombinationRate: "0"
+GeneConversionRate: "0.0000000488"
+DoubleRecombinationRate: "0.00004"
 
 # Lowercase key is retained for compatibility with the existing launcher.
 outputRoot: "/share/guerrerolab/baturne5/laics_output/diag/"

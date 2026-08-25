@@ -558,7 +558,8 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
                                           double cutLineageTime,
                                           const Parameters::ParameterData& params,
                                           const std::vector<std::vector<double>>& mig_prob,
-                                          const std::vector<std::pair<double, std::vector<std::vector<double>>>>& mig_schedule,
+                                          const std::vector<std::pair<double, std::vector<std::vector<double>>>>& standard_mig_schedule,
+                                          const std::vector<std::pair<double, std::vector<std::vector<double>>>>& inverted_mig_schedule,
                                           double currentHopX,
                                           SMCStepOutcome* outcome,
                                           std::ofstream& evlog,
@@ -586,8 +587,15 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
         std::vector<double> totalG_i(lineages.size(), 0.0);
         double totalM = 0.0;
         double totalG = 0.0;
-        const auto& activeMig = migrationMatrixAtTime_SMC(mig_schedule, mig_prob, currentTime);
+        
         for (size_t i = 0; i < lineages.size(); ++i) {
+            // Determine the appropriate migration schedule based on the lineage's inversion status
+            const auto& lineageSchedule = lineages[i]->context.inversion == 1
+                ? inverted_mig_schedule
+                : standard_mig_schedule;
+            // Get the active migration matrix for the current time
+                const auto& activeMig = migrationMatrixAtTime_SMC(
+                lineageSchedule, mig_prob, currentTime);
             totalM_i[i] = computeTotalM_SMC(lineages[i], params, activeMig);
             totalG_i[i] = computeTotalG_SMC(lineages[i], params, currentTime, currentHopX);
             totalM += totalM_i[i];
@@ -644,7 +652,7 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
             }
             continue;
         }
-        if (nextMigrationMatrixTimeAfter_SMC(mig_schedule, startTime, nextEpoch) &&
+        if (nextMigrationMatrixTimeAfter_SMC(standard_mig_schedule, startTime, nextEpoch) &&
             event_time >= nextEpoch) {
             currentTime = nextEpoch;
             continue;
@@ -712,6 +720,12 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
         for (size_t i = 0; i < lineages.size(); ++i) {
             if (rem < totalM_i[i]) {
                 Context newCtx = lineages[i]->context;
+                // Determine the appropriate migration schedule based on the lineage's inversion status
+                const auto& lineageSchedule = newCtx.inversion == 1
+                    ? inverted_mig_schedule
+                    : standard_mig_schedule;
+                const auto& activeMig = migrationMatrixAtTime_SMC(
+                    lineageSchedule, mig_prob, currentTime);
                 newCtx.pop = pickMigrationDest_SMC(newCtx.pop, activeMig);
                 TreeNode* nr = addUnaryAbove(lineages[i], nextId++, event_time, newCtx);
                 if (nr && nr->parent == nullptr) lineages[i] = nr;
@@ -763,7 +777,8 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
                            double cutStartTime,
                            const Parameters::ParameterData& params,
                            const std::vector<std::vector<double>>& mig_prob,
-                           const std::vector<std::pair<double, std::vector<std::vector<double>>>>& mig_schedule,
+                           const std::vector<std::pair<double, std::vector<std::vector<double>>>>& standard_mig_schedule,
+                           const std::vector<std::pair<double, std::vector<std::vector<double>>>>& inverted_mig_schedule,
                            double currentHopX,
                            int hopIndex,
                            SMCStepOutcome* outcome,
@@ -801,12 +816,13 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
         // Error catch for: a cut lineage at or above the retained root must use the above-root process.
         if (lineageTime >= root_time) {
             if (resolveAboveRootByMiniSMC_SMC(mainRoot, cutRoot, lineageTime,
-                                              params, mig_prob, currentHopX,
-                                              outcome, evlog, hopIndex, root_time)) {
+                                              params, mig_prob, standard_mig_schedule,
+                                              inverted_mig_schedule, currentHopX,
+                                              outcome, evlog, runIndex, hopIndex, root_time)) {
                 return true;
             }
             std::cerr << "SMC reattachment failed: above-root simulation did not coalesce.\n";
-            recordEventRow_SMC(outcome, evlog, hopIndex, currentHopX,
+            recordEventRow_SMC(outcome, evlog, runIndex, hopIndex, currentHopX,
                                "above_root_fallback_failed", root_time);
             if (outcome) {
                 outcome->coalesced = false;
@@ -823,7 +839,12 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
         collectReattachCandidates_SMC(mainRoot, lineageTime, cutRoot->context,
                                       params, eligibleTargets);
 
-        const auto& activeMig = migrationMatrixAtTime_SMC(mig_schedule, mig_prob, lineageTime);
+        // Determine the appropriate migration schedule based on the cutRoot's inversion status
+        const auto& lineageSchedule = cutRoot->context.inversion == 1
+            ? inverted_mig_schedule
+            : standard_mig_schedule;
+        const auto& activeMig = migrationMatrixAtTime_SMC(
+            lineageSchedule, mig_prob, lineageTime);
         double totalM = computeTotalM_SMC(cutRoot, params, activeMig);
 
         // pairRate is the coalescence rate for a single compatible pair of lineages in the same context
@@ -875,7 +896,7 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
             crossedEpoch = true;
         }
         double migEpoch = 0.0;
-        if (nextMigrationMatrixTimeAfter_SMC(mig_schedule, lineageTime, migEpoch) &&
+        if (nextMigrationMatrixTimeAfter_SMC(standard_mig_schedule, lineageTime, migEpoch) &&
             event_time >= migEpoch &&
             (!crossedEpoch || migEpoch < nextEpoch)) {
             nextEpoch = migEpoch;
@@ -905,7 +926,11 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
         }
 
         if (event_time >= root_time) {
-            if (resolveAboveRootByMiniSMC_SMC(mainRoot, cutRoot, lineageTime, params, mig_prob, mig_schedule, currentHopX, outcome, evlog, runIndex, hopIndex, root_time)) {
+            if (resolveAboveRootByMiniSMC_SMC(mainRoot, cutRoot, lineageTime,
+                                              params, mig_prob, standard_mig_schedule,
+                                              inverted_mig_schedule, currentHopX,
+                                              outcome, evlog, runIndex, hopIndex,
+                                              root_time)) {
                 return true;
             }
             std::cerr << "SMC reattachment failed: above-root simulation did not coalesce.\n";

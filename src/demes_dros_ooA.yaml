@@ -1,0 +1,35 @@
+description: Two pop, three epoch (modern, bottleneck, ancestral) model estimated for two Drosophila Melanogaster populations, African (ancestral) and European (derived) from Li and Stephan (2006). 
+
+demes:
+
+    # Ancestral African population
+  - name: root
+    epochs:
+        # Ancestral pop. Size, 
+      - start_size: 1720600
+        end_time: 600000
+        # # Post-expansion African pop. Size
+      - start_size: 8603000
+        end_time: 158000
+
+  # Derived African population
+  - name: pop0
+    ancestors: [root]
+    epochs:
+      - start_size: 8603000
+        end_time: 0    
+
+    # Derived European population
+  - name: pop1
+    ancestors: [root]
+    epochs:
+        # bottleneck European pop. Size
+      - start_size: 2200
+        end_time: 154600
+        # rapid expansion European pop. Size
+      - start_size: 1075000
+        end_time: 0
+
+migrations:
+  - demes: [pop0, pop1]
+    rate: 0
