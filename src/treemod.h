@@ -1,6 +1,7 @@
 #ifndef TREEMOD_H
 #define TREEMOD_H
 
+#include <unordered_map>
 #include <vector>
 #include "typedefs.h"
 #include "sitenode.h"
@@ -15,6 +16,7 @@ struct TreeNode {
 
 TreeNode* buildEditableTree(const SiteNode& root);
 TreeNode* cloneTree(const TreeNode* root);
+TreeNode* cloneTreeWithMap(const TreeNode* root, std::unordered_map<unsigned long, TreeNode*>& idMap);
 void freeTree(TreeNode* root);
 
 TreeNode* findNodeById(TreeNode* root, unsigned long id);

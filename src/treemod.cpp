@@ -28,22 +28,30 @@ TreeNode* buildEditableTree(const SiteNode& root) {
     return out;
 }
 
-static TreeNode* cloneRec(const TreeNode* src, TreeNode* parent) {
+static TreeNode* cloneRec(const TreeNode* src,
+                          TreeNode* parent,
+                          std::unordered_map<unsigned long, TreeNode*>* idMap) {
     if (!src) return nullptr;
     TreeNode* out = new TreeNode();
     out->id = src->id;
     out->time = src->time;
     out->context = src->context;
     out->parent = parent;
+    if (idMap) (*idMap)[out->id] = out;
     for (auto* ch : src->children) {
-        TreeNode* c = cloneRec(ch, out);
+        TreeNode* c = cloneRec(ch, out, idMap);
         if (c) out->children.push_back(c);
     }
     return out;
 }
 
 TreeNode* cloneTree(const TreeNode* root) {
-    return cloneRec(root, nullptr);
+    return cloneRec(root, nullptr, nullptr);
+}
+
+TreeNode* cloneTreeWithMap(const TreeNode* root, std::unordered_map<unsigned long, TreeNode*>& idMap) {
+    idMap.clear();
+    return cloneRec(root, nullptr, &idMap);
 }
 
 static void freeRec(TreeNode* node) {
