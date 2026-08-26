@@ -220,7 +220,7 @@ def render_tree_ascii(graph, only_these_leaves=None):
     return "\n".join(lines)
 
 def write_migration_matrices_from_demes(graph, leaf_order, spec_events,
-                                        initial_freqs,
+                                        initial_freqs, inversion_age,
                                         out_json=MIGRATION_JSON,
                                         adjusted_standard_json=ADJUSTED_STANDARD_MIGRATION_JSON,
                                         adjusted_inverted_json=ADJUSTED_INVERTED_MIGRATION_JSON,
@@ -310,7 +310,11 @@ def write_migration_matrices_from_demes(graph, leaf_order, spec_events,
     payload = {}
     adjusted_standard_payload = {}
     adjusted_inverted_payload = {}
-    output_times = sorted(set(list(times) + [ev[2] for ev in spec_events]))
+    # if inv age is >0, we need to include it in the output times so that we can adjust the matrices at that time point as well
+    output_time_values = list(times) + [ev[2] for ev in spec_events]
+    if inversion_age > 0:
+        output_time_values.append(float(inversion_age))
+    output_times = sorted(set(output_time_values))
     for t in output_times:
         apply_speciation_until(t)
         src = source_matrix_at(t)
@@ -328,11 +332,17 @@ def write_migration_matrices_from_demes(graph, leaf_order, spec_events,
         # Precompute the full context-size conversion used for backward migration.
         # ARG/x0 retain the raw schedule and their existing q1/q2 calculation.
         active_sizes = [float(by_name[name].size_at(t)) for name in active_names]
+        # If the inversion has reached its age, we set the effective frequencies to zero for the purpose of context-size adjustment.
+        effective_freqs = (
+            [0.0] * len(active_freqs)
+            if inversion_age > 0 and t + 1e-9 >= inversion_age
+            else active_freqs
+        )
 
         def adjusted_for_arrangement(inverted):
             context_sizes = [
                 size * (freq if inverted else 1.0 - freq)
-                for size, freq in zip(active_sizes, active_freqs)
+                for size, freq in zip(active_sizes, effective_freqs)
             ]
             adjusted_matrix = []
             for i, row in enumerate(remapped):
@@ -580,6 +590,7 @@ try:
         debug_info["leaf_order"],
         debug_info["events"],
         [float(x) for x in parameters["inv_freq"].split()],
+        float(parameters["inv_age"]),
     )
 except Exception as e:
     print(f"Error writing {MIGRATION_JSON}: {e}", file=sys.stderr)
