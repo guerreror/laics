@@ -310,8 +310,20 @@ def write_migration_matrices_from_demes(graph, leaf_order, spec_events,
     payload = {}
     adjusted_standard_payload = {}
     adjusted_inverted_payload = {}
-    # if inv age is >0, we need to include it in the output times so that we can adjust the matrices at that time point as well
-    output_time_values = list(times) + [ev[2] for ev in spec_events]
+    # Context-size-adjusted migration rates must be recalculated whenever a
+    # population-size epoch changes, as well as at migration/speciation epochs.
+    demographic_times = [
+        float(epoch.end_time)
+        for deme in graph.demes
+        for epoch in deme.epochs
+        if 0 < epoch.end_time < float("inf")
+    ]
+    output_time_values = (
+        list(times)
+        + [ev[2] for ev in spec_events]
+        + demographic_times
+    )
+    # If inv age is >0, include it so context frequencies are updated there too.
     if inversion_age > 0:
         output_time_values.append(float(inversion_age))
     output_times = sorted(set(output_time_values))
