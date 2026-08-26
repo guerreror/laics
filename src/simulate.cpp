@@ -89,8 +89,10 @@ unsigned short World::simulateGeneration(vector < vector <double> > & mig_prob){
                 if(l!=pop){
                     double q1q2 = 0;
                     if(mfreq.at(pop) > 0) q1q2 = mfreq.at(l)/mfreq.at(pop);
-                    b_mig_total += mig_prob.at(pop).at(l) * q1q2;
-                    migs.push_back(b_mig_total);
+                    // BT changed so that the migration rate is adjusted by the relative frequency of the inv context in the source and destination populations
+                    const double adjusted_mig = mig_prob.at(pop).at(l) * q1q2;
+                    b_mig_total += adjusted_mig;
+                    migs.push_back(adjusted_mig);
                 }
                 else migs.push_back(0);
             }
@@ -369,11 +371,36 @@ unsigned short World::migrateEvent(vector < vector< double> >& mig_prob, vector<
     shared_ptr<Chromosome> chrom = worldData->carriers->at(c).at(who);	// Get the migrant carrier
     
     
+    // replacing whereto=0; if( chrom->getContext().pop==0) whereto=1;
+    // Now we need to figure out where the carrier is going. 
+    // We use the migration probability vector for this context, and scale it to 1.
+    const vector<double>& destinationRates = mig_prob.at(c);
+    double destinationTotal = 0.0;
+    for (double destinationRate : destinationRates) {
+        destinationTotal += destinationRate;
+    }
+    if (destinationTotal <= 0.0) {
+        std::cerr << "Error in World::migrateEvent(): selected context has no migration destination\n";
+        return 0;
+    }
+
+    // Now we select the destination population based on the scaled migration probabilities.
+    const double destinationRoll = randreal(0, destinationTotal);
+    double destinationCumulative = 0.0;
+    int whereto = -1;
+    for (size_t destination = 0; destination < destinationRates.size(); ++destination) {
+        // Skip destinations with zero migration rate
+        if (destinationRates[destination] <= 0.0) continue;
+        destinationCumulative += destinationRates[destination];
+        // If the random roll falls within the cumulative range, select this destination
+        if (destinationRoll <= destinationCumulative) {
+            whereto = static_cast<int>(destination);
+            break;
+        }
+    }
+
     vector<shared_ptr<Chromosome> >::iterator pos = worldData->carriers->at(c).begin() + who;
     worldData->carriers->at(c).erase(pos);
-    
-    //THIS FIX ASSUMES TWO POPS ONLY!!! MUST CHANGE
-    int whereto=0; if( chrom->getContext().pop==0) whereto=1;
     
     
     chrom->setPopulation(whereto);													// change the context of this carrier to its new population

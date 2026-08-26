@@ -1014,8 +1014,9 @@ unsigned short World::simulateGeneration_SMC(vector<vector<double>>& mig_prob) {
                 if (l != pop) {
                     double q1q2 = 0;
                     if (mfreq.at(pop) > 0) q1q2 = mfreq.at(l) / mfreq.at(pop);
-                    b_mig_total += mig_prob.at(pop).at(l) * q1q2;
-                    migs.push_back(b_mig_total);
+                    const double adjusted_mig = mig_prob.at(pop).at(l) * q1q2;
+                    b_mig_total += adjusted_mig;
+                    migs.push_back(adjusted_mig);
                 } else {
                     migs.push_back(0);
                 }
@@ -1134,11 +1135,31 @@ unsigned short World::migrateEvent_SMC(vector<vector<double>>& mig_prob, vector<
     unsigned long who = randint(0, worldData->carriers->at(c).size() - 1);
     std::shared_ptr<Chromosome> chrom = worldData->carriers->at(c).at(who);
 
+    const vector<double>& destinationRates = mig_prob.at(c);
+    double destinationTotal = 0.0;
+    for (double destinationRate : destinationRates) {
+        destinationTotal += destinationRate;
+    }
+    if (destinationTotal <= 0.0) {
+        std::cerr << "Error in World::migrateEvent_SMC(): selected context has no migration destination\n";
+        return 0;
+    }
+
+    const double destinationRoll = randreal(0, destinationTotal);
+    double destinationCumulative = 0.0;
+    int whereto = -1;
+    for (size_t destination = 0; destination < destinationRates.size(); ++destination) {
+        if (destinationRates[destination] <= 0.0) continue;
+        destinationCumulative += destinationRates[destination];
+        if (destinationRoll <= destinationCumulative) {
+            whereto = static_cast<int>(destination);
+            break;
+        }
+    }
+
     vector<std::shared_ptr<Chromosome>>::iterator pos = worldData->carriers->at(c).begin() + who;
     worldData->carriers->at(c).erase(pos);
 
-    int whereto = 0;
-    if (chrom->getContext().pop == 0) whereto = 1; // current SMC path assumes two extant pops
     chrom->setPopulation(whereto);
 
     int newC = cluster[chrom->getContext()];
