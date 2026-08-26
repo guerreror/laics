@@ -318,9 +318,9 @@ void World::speciation() {
 
 
 void World::freqStepToLoss(){
-    
+    // Past the inversion origin, every active population is entirely standard.
     for( cluster_t::iterator iter = cluster.begin(); iter != cluster.end(); ++iter ){
-        if(worldData->originCtx ==(*iter).first){
+        if((*iter).first.inversion == 0){
             worldData->freq[(*iter).second] = 1.0;
         }
         else{
