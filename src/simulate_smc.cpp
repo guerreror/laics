@@ -40,8 +40,6 @@ static void recordEventRow_SMC(SMCStepOutcome* outcome,
         << eventTime << ",,,\n";
     if (evlog.is_open()) {
         evlog << runIndex << "," << row.str();
-    } else if (outcome) {
-        outcome->eventRows.push_back(row.str());
     }
 }
 
@@ -400,6 +398,20 @@ static bool replaceChild_SMC(TreeNode* parent, TreeNode* oldChild, TreeNode* new
     return false;
 }
 
+static void pruneEmptyAncestors_SMC(TreeNode*& root, TreeNode* node) {
+    while (node && node->children.empty()) {
+        TreeNode* parent = node->parent;
+        if (parent) {
+            replaceChild_SMC(parent, node, nullptr);
+        } else if (root == node) {
+            root = nullptr;
+        }
+        node->parent = nullptr;
+        delete node;
+        node = parent;
+    }
+}
+
 static bool collapseInversionAge_SMC(TreeNode*& mainRoot,
                                      TreeNode*& cutRoot,
                                      double eventTime,
@@ -435,7 +447,9 @@ static bool collapseInversionAge_SMC(TreeNode*& mainRoot,
         if (i == 0) {
             replaceChild_SMC(candidates[i].parent, child, origin);
         } else {
-            replaceChild_SMC(candidates[i].parent, child, nullptr);
+            TreeNode* oldParent = candidates[i].parent;
+            replaceChild_SMC(oldParent, child, nullptr);
+            pruneEmptyAncestors_SMC(mainRoot, oldParent);
         }
         child->parent = origin;
         origin->children.push_back(child);

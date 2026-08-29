@@ -58,101 +58,139 @@
 # -----------------------------------------------------------------
 
 
-description: validation setup
+# description: validation setup
+# time_units: generations
+
+# demes:
+#   - name: root
+#     epochs:
+#       - start_size: 80000
+#         end_time: 35000
+
+#   - name: anc05
+#     start_time: 35000
+#     ancestors: [root]
+#     epochs:
+#       - start_size: 65000
+#         end_time: 10000
+
+#   - name: anc1324
+#     start_time: 35000
+#     ancestors: [root]
+#     epochs:
+#       - start_size: 70000
+#         end_time: 22000
+
+#   - name: anc13
+#     start_time: 22000
+#     ancestors: [anc1324]
+#     epochs:
+#       - start_size: 52000
+#         end_time: 12000
+
+#   - name: anc24
+#     start_time: 22000
+#     ancestors: [anc1324]
+#     epochs:
+#       - start_size: 48000
+#         end_time: 18000
+#       - start_size: 56000
+#         end_time: 14000
+
+#   - name: pop0
+#     start_time: 10000
+#     ancestors: [anc05]
+#     epochs:
+#       - start_size: 42000
+#         end_time: 0
+
+#   - name: pop5
+#     start_time: 10000
+#     ancestors: [anc05]
+#     epochs:
+#       - start_size: 46000
+#         end_time: 0
+
+#   - name: pop1
+#     start_time: 12000
+#     ancestors: [anc13]
+#     epochs:
+#       - start_size: 30000
+#         end_time: 4000
+#       - start_size: 38000
+#         end_time: 0
+
+#   - name: pop3
+#     start_time: 12000
+#     ancestors: [anc13]
+#     epochs:
+#       - start_size: 34000
+#         end_time: 8000
+#       - start_size: 40000
+#         end_time: 0
+
+#   - name: pop2
+#     start_time: 14000
+#     ancestors: [anc24]
+#     epochs:
+#       - start_size: 32000
+#         end_time: 6000
+#       - start_size: 39000
+#         end_time: 0
+
+#   - name: pop4
+#     start_time: 14000
+#     ancestors: [anc24]
+#     epochs:
+#       - start_size: 36000
+#         end_time: 2000
+#       - start_size: 43000
+#         end_time: 0
+
+# migrations:
+#   - demes: [pop0, pop5]
+#     rate: 0.0005
+#   - demes: [pop1, pop3]
+#     rate: 0.0008
+#   - demes: [pop2, pop4]
+#     rate: 0.0006
+#   - demes: [pop0, pop1]
+#     rate: 0.0004
+
+
+description: Two pop, three epoch (modern, bottleneck, ancestral) model estimated for two Drosophila Melanogaster populations, African (ancestral) and European (derived) from Li and Stephan (2006). 
 time_units: generations
 
 demes:
+
+    # Ancestral African population
   - name: root
     epochs:
-      - start_size: 80000
-        end_time: 35000
+        # Ancestral pop. Size, 
+      - start_size: 1720600
+        end_time: 600000
+        # # Post-expansion African pop. Size
+      - start_size: 8603000
+        end_time: 158000
 
-  - name: anc05
-    start_time: 35000
-    ancestors: [root]
-    epochs:
-      - start_size: 65000
-        end_time: 10000
-
-  - name: anc1324
-    start_time: 35000
-    ancestors: [root]
-    epochs:
-      - start_size: 70000
-        end_time: 22000
-
-  - name: anc13
-    start_time: 22000
-    ancestors: [anc1324]
-    epochs:
-      - start_size: 52000
-        end_time: 12000
-
-  - name: anc24
-    start_time: 22000
-    ancestors: [anc1324]
-    epochs:
-      - start_size: 48000
-        end_time: 18000
-      - start_size: 56000
-        end_time: 14000
-
+  # Derived African population
   - name: pop0
-    start_time: 10000
-    ancestors: [anc05]
+    ancestors: [root]
     epochs:
-      - start_size: 42000
-        end_time: 0
+      - start_size: 8603000
+        end_time: 0    
 
-  - name: pop5
-    start_time: 10000
-    ancestors: [anc05]
-    epochs:
-      - start_size: 46000
-        end_time: 0
-
+    # Derived European population
   - name: pop1
-    start_time: 12000
-    ancestors: [anc13]
+    ancestors: [root]
     epochs:
-      - start_size: 30000
-        end_time: 4000
-      - start_size: 38000
-        end_time: 0
-
-  - name: pop3
-    start_time: 12000
-    ancestors: [anc13]
-    epochs:
-      - start_size: 34000
-        end_time: 8000
-      - start_size: 40000
-        end_time: 0
-
-  - name: pop2
-    start_time: 14000
-    ancestors: [anc24]
-    epochs:
-      - start_size: 32000
-        end_time: 6000
-      - start_size: 39000
-        end_time: 0
-
-  - name: pop4
-    start_time: 14000
-    ancestors: [anc24]
-    epochs:
-      - start_size: 36000
-        end_time: 2000
-      - start_size: 43000
+        # bottleneck European pop. Size
+      - start_size: 2200
+        end_time: 154600
+        # rapid expansion European pop. Size
+      - start_size: 1075000
         end_time: 0
 
 migrations:
-  - demes: [pop0, pop5]
-    rate: 0.0005
-  - demes: [pop1, pop3]
-    rate: 0.0008
-  - demes: [pop2, pop4]
-    rate: 0.0006
   - demes: [pop0, pop1]
-    rate: 0.0004
+    rate: 0.0

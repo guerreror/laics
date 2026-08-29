@@ -14,11 +14,13 @@
 #include <chrono>
 #include <random>
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <iomanip>
 #include <cstdint>
 #include <cstring>
 #include <unordered_map>
+#include <unordered_set>
 
 using namespace std;
 
@@ -136,6 +138,133 @@ static bool pickWeightedEdge(const vector<EdgeWeight>& standard_edges,
     *outParent = all.back().parent;
     *outChild = all.back().child;
     return true;
+}
+
+static bool geneFluxIdWasDeleted(const vector<unsigned long>& deletedIds, unsigned long nodeId)
+{
+    return std::find(deletedIds.begin(), deletedIds.end(), nodeId) != deletedIds.end();
+}
+
+static void appendActiveGeneFluxEvents(vector<GeneFluxEvent_SMC>& active,
+                                       const vector<GeneFluxEvent_SMC>& incoming,
+                                       double currentX,
+                                       double eps)
+{
+    for (const auto& evt : incoming) {
+        if (evt.endX > currentX + eps) active.push_back(evt);
+    }
+}
+
+static long firstExpiredGeneFluxEvent(const vector<GeneFluxEvent_SMC>& active,
+                                      double currentX,
+                                      double eps)
+{
+    for (size_t i = 0; i < active.size(); ++i) {
+        if (active[i].endX <= currentX + eps) return static_cast<long>(i);
+    }
+    return -1;
+}
+
+static void removeDeletedGeneFluxEvents(vector<GeneFluxEvent_SMC>& active,
+                                        vector<GeneFluxEvent_SMC>& log,
+                                        const vector<unsigned long>& deletedIds)
+{
+    for (auto it = active.begin(); it != active.end();) {
+        if (geneFluxIdWasDeleted(deletedIds, it->nodeId)) {
+            log.push_back(*it);
+            it = active.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+static bool processGeneFluxBoundariesAtX(
+    TreeNode*& activeTree,
+    vector<GeneFluxEvent_SMC>& geneFluxActive,
+    vector<GeneFluxEvent_SMC>& geneFluxLog,
+    const Parameters::ParameterData& paramData,
+    const vector<vector<double>>& mig_prob_cut,
+    const vector<pair<double, vector<vector<double>>>>& schedule,
+    double currentX,
+    int hop,
+    int timer,
+    unsigned long& nextNodeId,
+    std::ofstream& hopEvents)
+{
+    const double eps = 1e-12;
+    while (true) {
+        const long idx = firstExpiredGeneFluxEvent(geneFluxActive, currentX, eps);
+        if (idx < 0) return true;
+
+        GeneFluxEvent_SMC evt = geneFluxActive[static_cast<size_t>(idx)];
+        TreeNode* gfNode = findNodeById(activeTree, evt.nodeId);
+        if (!gfNode) {
+            geneFluxLog.push_back(evt);
+            geneFluxActive.erase(geneFluxActive.begin() + idx);
+            if (hopEvents.is_open()) {
+                hopEvents << timer << "," << hop << "," << currentX
+                          << ",gene_flux_boundary_stale,,,,\n";
+            }
+            continue;
+        }
+        if (!gfNode->parent || gfNode->children.size() != 1) {
+            if (hopEvents.is_open()) {
+                hopEvents << timer << "," << hop << "," << currentX
+                          << ",gene_flux_boundary_invalid," << gfNode->time << ",,,\n";
+            }
+            return false;
+        }
+
+        TreeNode* cutRoot = nullptr;
+        vector<unsigned long> deletedIds;
+        const double restartTime = gfNode->time;
+        TreeNode* cutNode = gfNode->children.front();
+        const bool cutOk = cutAtNodeWithUnaryCleanupCollect(activeTree,
+                                                            cutNode,
+                                                            restartTime,
+                                                            &cutRoot,
+                                                            deletedIds);
+        if (!cutOk || !activeTree || !cutRoot) {
+            if (hopEvents.is_open()) {
+                hopEvents << timer << "," << hop << "," << currentX
+                          << ",gene_flux_boundary_cut_failed," << restartTime << ",,,\n";
+            }
+            return false;
+        }
+
+        removeDeletedGeneFluxEvents(geneFluxActive, geneFluxLog, deletedIds);
+        if (hopEvents.is_open()) {
+            hopEvents << timer << "," << hop << "," << currentX
+                      << ",gene_flux_boundary," << restartTime << ",,,\n";
+        }
+
+        SMCStepOutcome outcome;
+        const bool ok = simulateSMCOnTree_SMC(activeTree,
+                                              cutRoot,
+                                              restartTime,
+                                              paramData,
+                                              mig_prob_cut,
+                                              schedule,
+                                              currentX,
+                                              hop,
+                                              &outcome,
+                                              timer,
+                                              nextNodeId,
+                                              hopEvents);
+        appendActiveGeneFluxEvents(geneFluxActive, outcome.geneFluxEvents, currentX, eps);
+        if (!ok) {
+            if (hopEvents.is_open()) {
+                for (const auto& row : outcome.eventRows) {
+                    hopEvents << timer << "," << row;
+                }
+                hopEvents << timer << "," << hop << "," << currentX
+                          << ",gene_flux_boundary_reattach_failed," << restartTime << ",,,\n";
+            }
+            return false;
+        }
+        trimUnaryRootStem(activeTree);
+    }
 }
 
 static void collectEdgeWeightsFromTree(
@@ -256,50 +385,130 @@ static void packBinaryValue(char* buffer, size_t& offset, const T& value)
     offset += sizeof(T);
 }
 
-static void writeTreeSnapshotBinaryRows(std::ofstream& out,
-                                        TreeNode* node,
-                                        int32_t run,
-                                        int32_t hop,
-                                        double xStart,
-                                        double xEnd,
-                                        int64_t parentId)
-{
-    if (!node) return;
-    const uint64_t nodeId = static_cast<uint64_t>(node->id);
-    const double time = node->time;
-    const uint32_t pop = static_cast<uint32_t>(node->context.pop);
-    const uint16_t inversion = static_cast<uint16_t>(node->context.inversion);
-    char record[sizeof(run) + sizeof(hop) + sizeof(xStart) + sizeof(xEnd) +
-                sizeof(nodeId) + sizeof(parentId) + sizeof(time) +
-                sizeof(pop) + sizeof(inversion)];
-    size_t offset = 0;
-    packBinaryValue(record, offset, run);
-    packBinaryValue(record, offset, hop);
-    packBinaryValue(record, offset, xStart);
-    packBinaryValue(record, offset, xEnd);
-    packBinaryValue(record, offset, nodeId);
-    packBinaryValue(record, offset, parentId);
-    packBinaryValue(record, offset, time);
-    packBinaryValue(record, offset, pop);
-    packBinaryValue(record, offset, inversion);
-    out.write(record, sizeof(record));
-    for (auto* child : node->children) {
-        writeTreeSnapshotBinaryRows(out, child, run, hop, xStart, xEnd,
-                                    static_cast<int64_t>(node->id));
-    }
-}
+struct SnapshotNodeRecord {
+    int32_t run;
+    uint64_t id;
+    double time;
+    uint32_t pop;
+    uint16_t inversion;
+};
 
-static void appendTreeSnapshotBinary(std::ofstream& out,
-                                     TreeNode* tree,
-                                     int run,
-                                     int hop,
-                                     double xStart,
-                                     double xEnd)
-{
-    if (!out.is_open()) return;
-    writeTreeSnapshotBinaryRows(out, tree, static_cast<int32_t>(run),
-                                static_cast<int32_t>(hop), xStart, xEnd, -1);
-}
+struct SnapshotEdgeRecord {
+    int32_t run;
+    double left;
+    double right;
+    uint64_t parent;
+    uint64_t child;
+};
+
+struct SnapshotIntervalRecord {
+    int32_t run;
+    int32_t hop;
+    double left;
+    double right;
+};
+
+struct SnapshotBinaryStore {
+    std::vector<SnapshotNodeRecord> nodes;
+    std::vector<SnapshotEdgeRecord> edges;
+    std::vector<SnapshotIntervalRecord> intervals;
+    std::unordered_set<std::string> seenNodes;
+    std::unordered_map<std::string, size_t> openEdges;
+    bool enabled = false;
+
+    static std::string nodeKey(int run, uint64_t nodeId) {
+        return std::to_string(run) + ":" + std::to_string(nodeId);
+    }
+
+    static std::string edgeKey(int run, uint64_t parent, uint64_t child) {
+        return std::to_string(run) + ":" + std::to_string(parent) + ":" + std::to_string(child);
+    }
+
+    void collect(TreeNode* node, int run, double left, double right,
+                 std::unordered_set<std::string>& activeEdges) {
+        if (!node) return;
+        const uint64_t nodeId = static_cast<uint64_t>(node->id);
+        const std::string nk = nodeKey(run, nodeId);
+        if (seenNodes.insert(nk).second) {
+            nodes.push_back({static_cast<int32_t>(run), nodeId, node->time,
+                             static_cast<uint32_t>(node->context.pop),
+                             static_cast<uint16_t>(node->context.inversion)});
+        }
+        for (auto* child : node->children) {
+            if (!child) continue;
+            const uint64_t childId = static_cast<uint64_t>(child->id);
+            const std::string ek = edgeKey(run, nodeId, childId);
+            activeEdges.insert(ek);
+            if (right > left) {
+                auto it = openEdges.find(ek);
+                if (it != openEdges.end() && std::abs(edges[it->second].right - left) <= 1e-9) {
+                    edges[it->second].right = right;
+                } else {
+                    edges.push_back({static_cast<int32_t>(run), left, right, nodeId, childId});
+                    openEdges[ek] = edges.size() - 1;
+                }
+            } else {
+                edges.push_back({static_cast<int32_t>(run), left, right, nodeId, childId});
+            }
+            collect(child, run, left, right, activeEdges);
+        }
+    }
+
+    void append(TreeNode* tree, int run, int hop, double left, double right) {
+        if (!enabled || !tree) return;
+        intervals.push_back({static_cast<int32_t>(run), static_cast<int32_t>(hop), left, right});
+        std::unordered_set<std::string> activeEdges;
+        collect(tree, run, left, right, activeEdges);
+        for (auto it = openEdges.begin(); it != openEdges.end();) {
+            const bool sameRun = it->first.find(std::to_string(run) + ":") == 0;
+            if (sameRun && activeEdges.find(it->first) == activeEdges.end()) {
+                it = openEdges.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    template <typename T>
+    static void writeValue(std::ofstream& out, const T& value) {
+        out.write(reinterpret_cast<const char*>(&value), sizeof(T));
+    }
+
+    void write(const std::string& path) const {
+        if (!enabled) return;
+        std::ofstream out(path.c_str(), std::ios::binary);
+        if (!out.is_open()) return;
+        const char magic[8] = {'S','M','C','T','S','2','\0','\0'};
+        out.write(magic, sizeof(magic));
+        const uint64_t nNodes = nodes.size();
+        const uint64_t nEdges = edges.size();
+        const uint64_t nIntervals = intervals.size();
+        writeValue(out, nNodes);
+        writeValue(out, nEdges);
+        writeValue(out, nIntervals);
+
+        for (const auto& n : nodes) {
+            writeValue(out, n.run);
+            writeValue(out, n.id);
+            writeValue(out, n.time);
+            writeValue(out, n.pop);
+            writeValue(out, n.inversion);
+        }
+        for (const auto& e : edges) {
+            writeValue(out, e.run);
+            writeValue(out, e.left);
+            writeValue(out, e.right);
+            writeValue(out, e.parent);
+            writeValue(out, e.child);
+        }
+        for (const auto& i : intervals) {
+            writeValue(out, i.run);
+            writeValue(out, i.hop);
+            writeValue(out, i.left);
+            writeValue(out, i.right);
+        }
+    }
+};
 
 static std::string formatCoordForFilename(double x)
 {
@@ -396,11 +605,17 @@ int main(int argc, const char *argv[])
         mig_prob_cut = mig_prob;
     };
 
-    std::ofstream hopTrace("smc_hop_trace.csv");
+    std::ofstream hopTrace;
+    if (params.paramData->hopInformation) {
+        hopTrace.open("smc_hop_trace.csv");
+    }
     if (hopTrace.is_open()) {
         hopTrace << "run,hop,current_x,raw_delta_x,used_delta_x,next_x,rho,Li_sum,Ls_sum,root_time\n";
     }
-    std::ofstream hopEvents("smc_hop_events.csv");
+    std::ofstream hopEvents;
+    if (params.paramData->hopInformation) {
+        hopEvents.open("smc_hop_events.csv");
+    }
     if (hopEvents.is_open()) {
         hopEvents << "run,hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
     }
@@ -411,13 +626,8 @@ int main(int argc, const char *argv[])
     if (treeSnapshotsCSV.is_open()) {
         treeSnapshotsCSV << "run,hop,x_start,x_end,node_id,parent_id,time,pop,inversion\n";
     }
-    std::ofstream treeSnapshotsBin;
-    if (params.paramData->binarySnapshots) {
-        treeSnapshotsBin.open("smc_tree_snapshots.bin", std::ios::binary);
-    }
-    if (treeSnapshotsBin.is_open()) {
-        treeSnapshotsBin.write("SMCTREE1", 8);
-    }
+    SnapshotBinaryStore treeSnapshotsBin;
+    treeSnapshotsBin.enabled = params.paramData->binarySnapshots;
 
     for (int timer = 0; timer < (int)nRuns; ++timer)
     {
@@ -472,7 +682,7 @@ int main(int argc, const char *argv[])
         unsigned long nextNodeId = getMaxId(activeTree) + 1;
         double currentX = startX;
         appendTreeSnapshotCSV(treeSnapshotsCSV, activeTree, timer, 0, currentX, currentX);
-        appendTreeSnapshotBinary(treeSnapshotsBin, activeTree, timer, 0, currentX, currentX);
+        treeSnapshotsBin.append(activeTree, timer, 0, currentX, currentX);
         vector<GeneFluxEvent_SMC> geneFluxActive;
         vector<GeneFluxEvent_SMC> geneFluxLog;
         vector<EdgeWeight> last_standard_edges;
@@ -500,6 +710,22 @@ int main(int argc, const char *argv[])
 
         int hop = 0;
         while (currentX < params.paramData->smcRange.R) {
+            const double activeEps = 1e-12;
+            if (!processGeneFluxBoundariesAtX(activeTree,
+                                             geneFluxActive,
+                                             geneFluxLog,
+                                             *params.paramData,
+                                             mig_prob_cut,
+                                             schedule,
+                                             currentX,
+                                             hop,
+                                             timer,
+                                             nextNodeId,
+                                             hopEvents)) {
+                std::cerr << "SMC gene-flux boundary processing failed.\n";
+                break;
+            }
+
             vector<EdgeWeight> standard_edges;
             vector<EdgeWeight> inverted_edges;
             collectEdgeWeightsFromTree(activeTree,
@@ -535,12 +761,19 @@ int main(int argc, const char *argv[])
             }
             TreeNode* cutSubtree = nullptr;
             double cutStartTime = 0.0;
-            bool cutOk = cutEdgeRandomWithCleanup(workingTree, p, c, &cutSubtree, &cutStartTime);
+            vector<unsigned long> deletedIds;
+            bool cutOk = cutEdgeRandomWithCleanupCollect(workingTree,
+                                                         p,
+                                                         c,
+                                                         &cutSubtree,
+                                                         &cutStartTime,
+                                                         deletedIds);
             if (!cutOk) {
                 freeTree(workingTree);
                 std::cerr << "SMC cut-tree step skipped (invalid cut edge).\n";
                 break;
             }
+            removeDeletedGeneFluxEvents(geneFluxActive, geneFluxLog, deletedIds);
             SMCStepOutcome outcome;
             bool ok = simulateSMCOnTree_SMC(workingTree,
                                             cutSubtree,
@@ -555,9 +788,7 @@ int main(int argc, const char *argv[])
                                             nextNodeId,
                                             hopEvents);
 
-            for (const auto& evt : outcome.geneFluxEvents) {
-                geneFluxActive.push_back(evt);
-            }
+            appendActiveGeneFluxEvents(geneFluxActive, outcome.geneFluxEvents, currentX, activeEps);
 
             if (!ok) {
                 if (hopEvents.is_open()) {
@@ -592,14 +823,6 @@ int main(int argc, const char *argv[])
             }
             double nextX = currentX + hopDelta;
 
-            const double activeEps = 1e-12;
-            geneFluxActive.erase(
-                std::remove_if(geneFluxActive.begin(), geneFluxActive.end(),
-                               [currentX, activeEps](const GeneFluxEvent_SMC& evt) {
-                                   return evt.endX <= currentX + activeEps;
-                               }),
-                geneFluxActive.end());
-
             if (!geneFluxActive.empty()) {
                 size_t minIdx = 0;
                 for (size_t i = 1; i < geneFluxActive.size(); ++i) {
@@ -610,8 +833,6 @@ int main(int argc, const char *argv[])
                 const GeneFluxEvent_SMC minEvt = geneFluxActive[minIdx];
                 if (nextX >= minEvt.endX) {
                     nextX = minEvt.endX;
-                    geneFluxLog.push_back(minEvt);
-                    geneFluxActive.erase(geneFluxActive.begin() + static_cast<long>(minIdx));
                 }
             }
             const double finalHopDelta = nextX - currentX;
@@ -619,7 +840,7 @@ int main(int argc, const char *argv[])
                 continue;
             }
             appendTreeSnapshotCSV(treeSnapshotsCSV, activeTree, timer, hop + 1, currentX, nextX);
-            appendTreeSnapshotBinary(treeSnapshotsBin, activeTree, timer, hop + 1, currentX, nextX);
+            treeSnapshotsBin.append(activeTree, timer, hop + 1, currentX, nextX);
 
             bool writeThisHop = writeAllDiagnostics;
             vector<double> targetsForThisHop;
@@ -723,8 +944,8 @@ int main(int argc, const char *argv[])
             }
         }
 
-        hopEvents.flush();
-        hopTrace.flush();
+        if (hopEvents.is_open()) hopEvents.flush();
+        if (hopTrace.is_open()) hopTrace.flush();
 
         if (writeAllDiagnostics) {
             writeTreeDOT(activeTree, "genetree_modified.dot");
@@ -752,6 +973,7 @@ int main(int argc, const char *argv[])
     }
 
     end = std::chrono::system_clock::now();
+    treeSnapshotsBin.write("smc_tree_snapshots.bin");
     std::chrono::duration<double> elapsed_seconds = end - start;
     std::cerr << "Elapsed time: " << elapsed_seconds.count() << "s\n";
 

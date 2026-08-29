@@ -7,6 +7,9 @@ import argparse
 import re
 import random
 import json
+import gzip
+import os
+import shutil
 from collections import defaultdict, deque
 
 # ---------- File paths ----------
@@ -54,6 +57,7 @@ parameters = {
     "dr":           "1.0",
     "csvSnapshots": "0",
     "binarySnapshots": "1",
+    "hopInformation": "0",
 }
 
 YAML_KEY_ALIASES = {
@@ -79,6 +83,7 @@ YAML_KEY_ALIASES = {
     "DoubleRecombinationRate": "dr",
     "CSVSnapshots": "csvSnapshots",
     "BinarySnapshots": "binarySnapshots",
+    "HopInformation": "hopInformation",
 }
 
 DISPLAY_KEY_NAMES = {
@@ -108,6 +113,7 @@ DISPLAY_KEY_NAMES = {
     "dr": "DoubleRecombinationRate",
     "csvSnapshots": "CSVSnapshots",
     "binarySnapshots": "BinarySnapshots",
+    "hopInformation": "HopInformation",
 }
 
 # ---------- Helpers for demes ----------
@@ -652,6 +658,7 @@ if smc_flag == "1":
         parameters["dr"],
         parameters["csvSnapshots"],
         parameters["binarySnapshots"],
+        parameters["hopInformation"],
     ]
 
 try:
@@ -687,3 +694,12 @@ write_output_log = (
 if write_output_log:
     with open("Output_log.txt", "w") as log_file:
         log_file.writelines(stderr_lines)
+
+if smc_flag == "1" and parameters.get("binarySnapshots", "0").strip() == "1":
+    raw_snapshot = "smc_tree_snapshots.bin"
+    gz_snapshot = raw_snapshot + ".gz"
+    if os.path.isfile(raw_snapshot):
+        with open(raw_snapshot, "rb") as src, gzip.open(gz_snapshot, "wb", compresslevel=6) as dst:
+            shutil.copyfileobj(src, dst)
+        os.remove(raw_snapshot)
+        print(f"Compressed {raw_snapshot} -> {gz_snapshot}")
