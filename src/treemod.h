@@ -21,11 +21,22 @@ void freeTree(TreeNode* root);
 
 TreeNode* findNodeById(TreeNode* root, unsigned long id);
 bool cutAtNodeWithUnaryCleanup(TreeNode*& root, TreeNode* cutNode, double cutTime, TreeNode** outCutSubtree);
+bool cutAtNodeWithUnaryCleanupCollect(TreeNode*& root,
+                                      TreeNode* cutNode,
+                                      double cutTime,
+                                      TreeNode** outCutSubtree,
+                                      std::vector<unsigned long>& deletedIds);
 bool cutEdgeRandomWithCleanup(TreeNode*& root,
                               TreeNode* parent,
                               TreeNode* child,
                               TreeNode** outCutSubtree,
                               double* outCutTime);
+bool cutEdgeRandomWithCleanupCollect(TreeNode*& root,
+                                     TreeNode* parent,
+                                     TreeNode* child,
+                                     TreeNode** outCutSubtree,
+                                     double* outCutTime,
+                                     std::vector<unsigned long>& deletedIds);
 void trimUnaryRootStem(TreeNode*& root);
 
 unsigned long getMaxId(TreeNode* root);

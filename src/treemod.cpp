@@ -162,20 +162,31 @@ bool reattachAtTimeWithContext(TreeNode*& mainRoot,
     return true;
 }
 
-static TreeNode* trimRetainedSiblingAfterCut(TreeNode* node, double cutTime) {
+static void noteDeleted(TreeNode* node, std::vector<unsigned long>* deletedIds) {
+    if (node && deletedIds) deletedIds->push_back(node->id);
+}
+
+static TreeNode* trimRetainedSiblingAfterCut(TreeNode* node,
+                                             double cutTime,
+                                             std::vector<unsigned long>* deletedIds) {
     while (node && node->children.size() == 1 && node->time > cutTime) {
         TreeNode* child = node->children.front();
         if (!(node->context == child->context)) break;
         node->children.clear();
         node->parent = nullptr;
         child->parent = nullptr;
+        noteDeleted(node, deletedIds);
         delete node;
         node = child;
     }
     return node;
 }
 
-bool cutAtNodeWithUnaryCleanup(TreeNode*& root, TreeNode* cutNode, double cutTime, TreeNode** outCutSubtree) {
+static bool cutAtNodeWithUnaryCleanupImpl(TreeNode*& root,
+                                          TreeNode* cutNode,
+                                          double cutTime,
+                                          TreeNode** outCutSubtree,
+                                          std::vector<unsigned long>* deletedIds) {
     if (!root || !cutNode || !outCutSubtree) return false;
     if (!cutNode->parent) return false;
 
@@ -201,7 +212,7 @@ bool cutAtNodeWithUnaryCleanup(TreeNode*& root, TreeNode* cutNode, double cutTim
                 break;
             }
         }
-        sibling = trimRetainedSiblingAfterCut(sibling, cutTime);
+        sibling = trimRetainedSiblingAfterCut(sibling, cutTime, deletedIds);
     }
 
     // Detach cut subtree root.
@@ -231,6 +242,7 @@ bool cutAtNodeWithUnaryCleanup(TreeNode*& root, TreeNode* cutNode, double cutTim
     for (auto* u : unaryChain) {
         u->children.clear();
         u->parent = nullptr;
+        noteDeleted(u, deletedIds);
         delete u;
     }
 
@@ -238,10 +250,23 @@ bool cutAtNodeWithUnaryCleanup(TreeNode*& root, TreeNode* cutNode, double cutTim
     if (coal) {
         coal->children.clear();
         coal->parent = nullptr;
+        noteDeleted(coal, deletedIds);
         delete coal;
     }
 
     return true;
+}
+
+bool cutAtNodeWithUnaryCleanup(TreeNode*& root, TreeNode* cutNode, double cutTime, TreeNode** outCutSubtree) {
+    return cutAtNodeWithUnaryCleanupImpl(root, cutNode, cutTime, outCutSubtree, nullptr);
+}
+
+bool cutAtNodeWithUnaryCleanupCollect(TreeNode*& root,
+                                      TreeNode* cutNode,
+                                      double cutTime,
+                                      TreeNode** outCutSubtree,
+                                      std::vector<unsigned long>& deletedIds) {
+    return cutAtNodeWithUnaryCleanupImpl(root, cutNode, cutTime, outCutSubtree, &deletedIds);
 }
 
 bool cutEdgeRandomWithCleanup(TreeNode*& root,
@@ -261,6 +286,26 @@ bool cutEdgeRandomWithCleanup(TreeNode*& root,
     }
 
     return cutAtNodeWithUnaryCleanup(root, child, t_cut, outCutSubtree);
+}
+
+bool cutEdgeRandomWithCleanupCollect(TreeNode*& root,
+                                     TreeNode* parent,
+                                     TreeNode* child,
+                                     TreeNode** outCutSubtree,
+                                     double* outCutTime,
+                                     std::vector<unsigned long>& deletedIds) {
+    if (!root || !parent || !child || !outCutSubtree) return false;
+    if (child->parent != parent) return false;
+    const double t_parent = parent->time;
+    const double t_child = child->time;
+    if (t_parent <= t_child) return false;
+
+    const double t_cut = randreal(t_child, t_parent);
+    if (outCutTime) {
+        *outCutTime = t_cut;
+    }
+
+    return cutAtNodeWithUnaryCleanupCollect(root, child, t_cut, outCutSubtree, deletedIds);
 }
 
 void trimUnaryRootStem(TreeNode*& root) {

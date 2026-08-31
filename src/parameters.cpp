@@ -348,6 +348,11 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
         paramData->binarySnapshots = (param_vec[outputBase + 5] == "1");
     }
 
+    paramData->hopInformation = false;
+    if (param_vec.size() > outputBase + 6) {
+        paramData->hopInformation = (param_vec[outputBase + 6] == "1");
+    }
+
     std::cerr << "Verbose " << paramData->smcVerbose << '\n';
     if (paramData->targetSNPs.empty()) {
         std::cerr << "SMC target SNP diagnostics: none\n";
@@ -362,6 +367,7 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
     std::cerr << "Double Recombination Rate: " << paramData->drRate << '\n';
     std::cerr << "CSV snapshots: " << paramData->csvSnapshots << '\n';
     std::cerr << "Binary snapshots: " << paramData->binarySnapshots << '\n';
+    std::cerr << "Hop information: " << paramData->hopInformation << '\n';
 }
 
 Parameters::~Parameters(){

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import gzip
 import os
 import re
 import struct
@@ -7,8 +8,11 @@ import sys
 from collections import defaultdict
 from typing import Dict, List, Tuple
 
-MAGIC = b"SMCTREE1"
-RECORD = struct.Struct("<iiddQqdIH")
+MAGIC = b"SMCTS2\0\0"
+HEADER = struct.Struct("<QQQ")
+NODE_RECORD = struct.Struct("<iQdIH")
+EDGE_RECORD = struct.Struct("<iddQQ")
+INTERVAL_RECORD = struct.Struct("<iidd")
 
 
 def clean_x(value: float) -> str:
@@ -18,36 +22,57 @@ def clean_x(value: float) -> str:
     return text.replace(".", "p").replace("-", "m")
 
 
+def read_exact(f, size: int, label: str) -> bytes:
+    data = f.read(size)
+    if len(data) != size:
+        raise ValueError(f"Truncated snapshot binary while reading {label}.")
+    return data
+
+
 def read_snapshots(path: str):
-    rows_by_snapshot = defaultdict(list)
-    with open(path, "rb") as f:
+    nodes_by_run: Dict[int, Dict[int, dict]] = defaultdict(dict)
+    edges_by_run: Dict[int, List[dict]] = defaultdict(list)
+    intervals_by_run: Dict[int, List[Tuple[int, int, float, float]]] = defaultdict(list)
+
+    opener = gzip.open if path.endswith(".gz") else open
+    with opener(path, "rb") as f:
         magic = f.read(len(MAGIC))
         if magic != MAGIC:
-            raise ValueError("Invalid snapshot binary header.")
-        while True:
-            chunk = f.read(RECORD.size)
-            if not chunk:
-                break
-            if len(chunk) != RECORD.size:
-                raise ValueError("Truncated snapshot binary record.")
-            run, hop, x_start, x_end, node_id, parent_id, time, pop, inversion = RECORD.unpack(chunk)
-            key = (run, hop, x_start, x_end)
-            rows_by_snapshot[key].append({
-                "node_id": node_id,
-                "parent_id": parent_id,
-                "time": time,
-                "pop": pop,
-                "inversion": inversion,
+            raise ValueError("Invalid compact snapshot binary header. Re-run SMC to regenerate smc_tree_snapshots.bin.")
+        n_nodes, n_edges, n_intervals = HEADER.unpack(read_exact(f, HEADER.size, "header counts"))
+
+        for _ in range(n_nodes):
+            run, node_id, time, pop, inversion = NODE_RECORD.unpack(read_exact(f, NODE_RECORD.size, "node"))
+            nodes_by_run[run][int(node_id)] = {
+                "id": int(node_id),
+                "time": float(time),
+                "pop": int(pop),
+                "inv": int(inversion),
+                "label": f"{int(node_id)}\\nt={float(time):.6g}\\npop={int(pop)} inv={int(inversion)}",
+            }
+
+        for _ in range(n_edges):
+            run, left, right, parent, child = EDGE_RECORD.unpack(read_exact(f, EDGE_RECORD.size, "edge"))
+            edges_by_run[run].append({
+                "left": float(left),
+                "right": float(right),
+                "parent": int(parent),
+                "child": int(child),
             })
-    if not rows_by_snapshot:
-        raise ValueError("No tree snapshots found.")
-    return rows_by_snapshot
+
+        for _ in range(n_intervals):
+            run, hop, left, right = INTERVAL_RECORD.unpack(read_exact(f, INTERVAL_RECORD.size, "interval"))
+            intervals_by_run[run].append((run, hop, float(left), float(right)))
+
+    if not intervals_by_run:
+        raise ValueError("No tree snapshot intervals found.")
+    return nodes_by_run, edges_by_run, intervals_by_run
 
 
-def select_run(snapshots, requested_run):
-    runs = sorted({key[0] for key in snapshots})
+def select_run(intervals_by_run, requested_run):
+    runs = sorted(intervals_by_run)
     if requested_run is not None:
-        if requested_run not in runs:
+        if requested_run not in intervals_by_run:
             raise ValueError(f"run {requested_run} not found. Available runs: {runs}")
         return requested_run
     print(f"Available runs: {runs[0]}..{runs[-1]} ({len(runs)} total)")
@@ -55,13 +80,13 @@ def select_run(snapshots, requested_run):
     if text == "":
         raise ValueError("Run number is required.")
     run = int(text)
-    if run not in runs:
+    if run not in intervals_by_run:
         raise ValueError(f"run {run} not found. Available runs: {runs}")
     return run
 
 
-def select_snapshot(snapshots, run, target_x):
-    candidates = sorted([key for key in snapshots if key[0] == run], key=lambda k: (k[2], k[3], k[1]))
+def select_snapshot(intervals_by_run, run, target_x):
+    candidates = sorted(intervals_by_run[run], key=lambda k: (k[2], k[3], k[1]))
     if not candidates:
         raise ValueError(f"No snapshots found for run {run}.")
 
@@ -73,11 +98,7 @@ def select_snapshot(snapshots, run, target_x):
     containing = [key for key in candidates if key[2] + eps < target_x < key[3] - eps]
     if containing:
         key = containing[0]
-        prev_key = None
-        for candidate in candidates:
-            if candidate[0] == run and candidate[1] == key[1] - 1:
-                prev_key = candidate
-                break
+        prev_key = next((candidate for candidate in candidates if candidate[1] == key[1] - 1), None)
         options = []
         if prev_key is not None:
             options.append((f"tree at x_start={key[2]} before hop {key[1]}", prev_key))
@@ -121,23 +142,34 @@ def select_snapshot(snapshots, run, target_x):
     return options[idx]
 
 
-def build_nodes_edges(rows):
-    nodes: Dict[int, dict] = {}
+def edge_active_for_key(edge, key) -> bool:
+    _, _, left, right = key
+    eps = 1e-12
+    if abs(left - right) <= eps:
+        return abs(edge["left"] - left) <= eps and abs(edge["right"] - right) <= eps
+    return edge["left"] <= left + eps and edge["right"] >= right - eps and edge["right"] > edge["left"]
+
+
+def build_nodes_edges(nodes_by_run, edges_by_run, key):
+    run = key[0]
+    active_edges = [e for e in edges_by_run.get(run, []) if edge_active_for_key(e, key)]
+    if not active_edges:
+        raise ValueError(f"Selected snapshot has no active edges: run={run}, hop={key[1]}, x={key[2]}->{key[3]}")
+
+    used_ids = set()
     edges: List[Tuple[int, int]] = []
-    for row in rows:
-        node_id = int(row["node_id"])
-        parent_id = int(row["parent_id"])
-        nodes[node_id] = {
-            "id": node_id,
-            "time": float(row["time"]),
-            "pop": int(row["pop"]),
-            "inv": int(row["inversion"]),
-            "label": f"{node_id}\\nt={float(row['time']):.6g}\\npop={row['pop']} inv={row['inversion']}",
-        }
-        if parent_id >= 0:
-            edges.append((parent_id, node_id))
-    if not nodes:
-        raise ValueError("Selected snapshot has no nodes.")
+    for edge in active_edges:
+        parent = int(edge["parent"])
+        child = int(edge["child"])
+        used_ids.add(parent)
+        used_ids.add(child)
+        edges.append((parent, child))
+
+    all_nodes = nodes_by_run.get(run, {})
+    nodes = {node_id: all_nodes[node_id].copy() for node_id in used_ids if node_id in all_nodes}
+    missing = sorted(used_ids - set(nodes))
+    if missing:
+        raise ValueError(f"Missing node records for IDs: {missing[:10]}")
     return nodes, edges
 
 
@@ -205,8 +237,8 @@ def svg_to_png(svg_path: str, png_path: str):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Render one SMC tree from smc_tree_snapshots.bin.")
-    parser.add_argument("--snapshot-bin", default="smc_tree_snapshots.bin")
+    parser = argparse.ArgumentParser(description="Render one SMC tree from compact smc_tree_snapshots.bin(.gz).")
+    parser.add_argument("--snapshot-bin", default="smc_tree_snapshots.bin.gz")
     parser.add_argument("--target-x", type=float)
     parser.add_argument("--run", type=int)
     parser.add_argument("--sequence-length", type=float, default=1.0)
@@ -215,21 +247,23 @@ def main() -> int:
     parser.add_argument("--show-labels", action="store_true")
     args = parser.parse_args()
 
+    if not os.path.isfile(args.snapshot_bin) and args.snapshot_bin == "smc_tree_snapshots.bin.gz":
+        args.snapshot_bin = "smc_tree_snapshots.bin"
     if not os.path.isfile(args.snapshot_bin):
         print(f"Error: file not found: {args.snapshot_bin}", file=sys.stderr)
         return 1
 
     try:
-        snapshots = read_snapshots(args.snapshot_bin)
-        run = select_run(snapshots, args.run)
+        nodes_by_run, edges_by_run, intervals_by_run = read_snapshots(args.snapshot_bin)
+        run = select_run(intervals_by_run, args.run)
         target_x = args.target_x
         if target_x is None:
             text = input("Chromosome x position to render: ").strip()
             if text == "":
                 raise ValueError("Chromosome x position is required.")
             target_x = float(text)
-        key = select_snapshot(snapshots, run, target_x)
-        nodes, edges = build_nodes_edges(snapshots[key])
+        key = select_snapshot(intervals_by_run, run, target_x)
+        nodes, edges = build_nodes_edges(nodes_by_run, edges_by_run, key)
         ts = build_tskit(nodes, edges, args.sequence_length)
         base = f"bin_run{key[0]}_hop{key[1]}_x{clean_x(target_x)}"
         out_svg = base + ".tskit.svg"

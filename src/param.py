@@ -9,6 +9,9 @@ import re
 import random
 from datetime import datetime
 import json
+import gzip
+import os
+import shutil
 from collections import defaultdict, deque
 
 # ---------- File paths ----------
@@ -59,6 +62,7 @@ parameters = {
     "dr":           "1.0",
     "csvSnapshots": "0",
     "binarySnapshots": "1",
+    "hopInformation": "0",
     "outputRoot":   DEFAULT_OUTPUT_ROOT,
 }
 
@@ -85,6 +89,7 @@ YAML_KEY_ALIASES = {
     "DoubleRecombinationRate": "dr",
     "CSVSnapshots": "csvSnapshots",
     "BinarySnapshots": "binarySnapshots",
+    "HopInformation": "hopInformation",
 }
 
 DISPLAY_KEY_NAMES = {
@@ -114,6 +119,7 @@ DISPLAY_KEY_NAMES = {
     "dr": "DoubleRecombinationRate",
     "csvSnapshots": "CSVSnapshots",
     "binarySnapshots": "BinarySnapshots",
+    "hopInformation": "HopInformation",
 }
 
 # ---------- Helpers for demes ----------
@@ -732,7 +738,66 @@ if smc_flag == "1":
         parameters["dr"],
         parameters["csvSnapshots"],
         parameters["binarySnapshots"],
+        parameters["hopInformation"],
     ]
+
+output_root = os.environ.get("LAICS_OUTPUT_ROOT", parameters.get("outputRoot", DEFAULT_OUTPUT_ROOT))
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+seed_label = re.sub(r"[^A-Za-z0-9_.-]+", "_", parameters.get("seed", "seed"))
+run_mode = "smc" if smc_flag == "1" else "arg"
+output_dir = os.path.join(output_root, f"run_{timestamp}_seed{seed_label}_{run_mode}")
+trees_dir = os.path.join(output_dir, "trees")
+try:
+    os.makedirs(trees_dir, exist_ok=False)
+except OSError as e:
+    print(f"Error creating output directory {output_dir}: {e}", file=sys.stderr)
+    sys.exit(1)
+
+print("\nFinal parameters being passed:")
+for k in base_keys_order:
+    print(f"{k}: {parameters[k]}")
+print(f"output_dir: {output_dir}")
+    
+# Print the tail clearly
+if random_flag == "1":
+    print(f"random sample totals: {per_pop_strings[0]}")
+else:
+    for i, sample_string in enumerate(per_pop_strings):
+        print(f"samples (pop{i}): {sample_string}")
+if smc_flag == "1":
+    print(f"verbose: {parameters['verbose']}")
+    print(f"target_snp: {parameters['target_snp']}")
+    print(f"gc: {parameters['gc']}")
+    print(f"dr: {parameters['dr']}")
+
+output_root = os.environ.get("LAICS_OUTPUT_ROOT", parameters.get("outputRoot", DEFAULT_OUTPUT_ROOT))
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+seed_label = re.sub(r"[^A-Za-z0-9_.-]+", "_", parameters.get("seed", "seed"))
+run_mode = "smc" if smc_flag == "1" else "arg"
+output_dir = os.path.join(output_root, f"run_{timestamp}_seed{seed_label}_{run_mode}")
+trees_dir = os.path.join(output_dir, "trees")
+try:
+    os.makedirs(trees_dir, exist_ok=False)
+except OSError as e:
+    print(f"Error creating output directory {output_dir}: {e}", file=sys.stderr)
+    sys.exit(1)
+
+print("\nFinal parameters being passed:")
+for k in base_keys_order:
+    print(f"{k}: {parameters[k]}")
+print(f"output_dir: {output_dir}")
+    
+# Print the tail clearly
+if random_flag == "1":
+    print(f"random sample totals: {per_pop_strings[0]}")
+else:
+    for i, sample_string in enumerate(per_pop_strings):
+        print(f"samples (pop{i}): {sample_string}")
+if smc_flag == "1":
+    print(f"verbose: {parameters['verbose']}")
+    print(f"target_snp: {parameters['target_snp']}")
+    print(f"gc: {parameters['gc']}")
+    print(f"dr: {parameters['dr']}")
 
 output_root = os.environ.get("LAICS_OUTPUT_ROOT", parameters.get("outputRoot", DEFAULT_OUTPUT_ROOT))
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")

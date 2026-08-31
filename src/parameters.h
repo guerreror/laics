@@ -73,6 +73,7 @@
      double drRate;
      bool csvSnapshots;
      bool binarySnapshots;
+     bool hopInformation;
      double timestamp;
      unsigned long totalPopSize;
  };
