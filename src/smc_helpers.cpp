@@ -26,6 +26,10 @@ SMCActiveState activeStateAtTime_SMC(const Parameters::ParameterData& params, do
                                params.speciation[i + 3], params.speciation[i + 4]}});
         }
     }
+    // Inversion age needs to be assessed, along with existing speciation and demography events
+    if (params.inv_age > 0) {
+    events.push_back({static_cast<double>(params.inv_age), 0, {}});
+    }
 
     std::sort(events.begin(), events.end(), [](const Event& a, const Event& b) {
         if (a.time != b.time) return a.time < b.time;
@@ -38,7 +42,7 @@ SMCActiveState activeStateAtTime_SMC(const Parameters::ParameterData& params, do
         if (ev.type == 2) {
             for (size_t k = 0; k < state.popSizes.size() && k < ev.data.size(); ++k)
                 if (ev.data[k] != 0) state.popSizes[k] = static_cast<unsigned int>(ev.data[k]);
-        } else {
+        } else if (ev.type == 1) {
             const unsigned int A = static_cast<unsigned int>(ev.data[0]);
             const unsigned int B = static_cast<unsigned int>(ev.data[1]);
             if (A < state.popSizes.size() && B < state.popSizes.size()) {
@@ -47,6 +51,9 @@ SMCActiveState activeStateAtTime_SMC(const Parameters::ParameterData& params, do
                 state.popSizes.erase(state.popSizes.begin() + static_cast<long>(B));
                 state.invFreqs.erase(state.invFreqs.begin() + static_cast<long>(B));
             }
+        // Inversion age boundary, set all samples to standard 
+        } else if (ev.type == 0) {
+            std::fill(state.invFreqs.begin(), state.invFreqs.end(), 0.0);
         }
     }
     return state;
