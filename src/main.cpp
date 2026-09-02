@@ -138,6 +138,15 @@ int main(int argc, const char *argv[])
     unsigned int nRuns = params.paramData->nRuns;
     unsigned int nSites = params.paramData->n_SNPs;
 
+    ofstream tmrca_out(pathJoin(output_dir, "arg_tmrca.csv").c_str());
+    if (tmrca_out.is_open()) {
+        tmrca_out << "run,site_index,site_position_morgan,tmrca_scaled\n";
+    }
+    ofstream tmrca_by_site_out(pathJoin(output_dir, "arg_tmrca_by_site.csv").c_str());
+    if (tmrca_by_site_out.is_open()) {
+        tmrca_by_site_out << "run,site_index,site_position_morgan,tmrca_scaled\n";
+    }
+
 
     const std::string mig_json = "src/migration_matrices.json";
     auto schedule = readMigrationSchedule(mig_json);
@@ -252,6 +261,21 @@ int main(int argc, const char *argv[])
             }
             lengthLastSite = tmp.totalLength / (double)params.paramData->totalPopSize;
             double totalmrca = geneTree.getTime() / (double)params.paramData->totalPopSize;
+            // `arg_tmrca.csv` preserves the original one-value-per-replicate
+            // benchmark. The by-site file is long-format, so downstream tools
+            // do not need to know how many SNP positions were requested.
+            if (k == 0 && tmrca_out.is_open()) {
+                tmrca_out << timer << ","
+                          << pos << ","
+                          << params.paramData->neut_site[pos] << ","
+                          << totalmrca << "\n";
+            }
+            if (tmrca_by_site_out.is_open()) {
+                tmrca_by_site_out << timer << ","
+                                  << pos << ","
+                                  << params.paramData->neut_site[pos] << ","
+                                  << totalmrca << "\n";
+            }
             outTime.at(k) += totalmrca;
             tempLD[k] = totalmrca;
         }
@@ -320,6 +344,10 @@ int main(int argc, const char *argv[])
         msout.close();
     if (stout.is_open())
         stout.close();
+    if (tmrca_out.is_open())
+        tmrca_out.close();
+    if (tmrca_by_site_out.is_open())
+        tmrca_by_site_out.close();
 
     end = std::chrono::system_clock::now();
     std::chrono::duration<double> elapsed_seconds = end - start;
