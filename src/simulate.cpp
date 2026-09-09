@@ -57,8 +57,8 @@ unsigned short World::simulateGeneration(vector < vector <double> > & mig_prob){
     vector<double> cRate;
     vector<double> rRate;
     vector<double> hRate;
-    vector<double> drRate;
-    vector<double> gcRate;
+    vector<double> drRates;
+    vector<double> gcRates;
     
     double totalM=0;
     double totalC=0;
@@ -66,6 +66,9 @@ unsigned short World::simulateGeneration(vector < vector <double> > & mig_prob){
     double totalH=0;
     double totalDR=0;
     double totalGC=0;
+    const double inversionLengthBp =
+        (worldData->invRange.R - worldData->invRange.L) *
+        worldData->basesPerMorgan;
     
     for( cluster_t::iterator i = cluster.begin(); i != cluster.end(); ++i ) {
         Context cxt =i->first;
@@ -127,11 +130,14 @@ unsigned short World::simulateGeneration(vector < vector <double> > & mig_prob){
             }
             
             for(int carrierID = 0; carrierID < k; ++carrierID){
-                const double carrierGcRate = (1-freqI)*worldData->gcRate;
-                const double carrierDrRate = (1-freqI)*worldData->drRate;
-                
-                gcRate.push_back(carrierGcRate);
-                drRate.push_back(carrierDrRate);
+                const double oppositeFrequency = 1.0 - freqI;
+                const double carrierGcRate =
+                    oppositeFrequency * worldData->gcRate * inversionLengthBp;
+                const double carrierDrRate =
+                    oppositeFrequency * worldData->drRate;
+
+                gcRates.push_back(carrierGcRate);
+                drRates.push_back(carrierDrRate);
 
                 totalGC += carrierGcRate;
                 totalDR += carrierDrRate;
@@ -165,9 +171,9 @@ unsigned short World::simulateGeneration(vector < vector <double> > & mig_prob){
             else if (event < (totalM+totalC+totalR)/Rate)			nEvents+= recombineEvent(rRate, totalR, RecombinationType::Homokaryotypic);
             else if (event < (totalM+totalC+totalR+totalH)/Rate)	nEvents+= recombineEvent(hRate, totalH, RecombinationType::Heterokaryotypic);
             else if (event < (totalM+totalC+totalR+totalH+totalGC)/Rate)
-                nEvents += recombineEvent(gcRate, totalGC, RecombinationType::GeneConversion);
+                nEvents += recombineEvent(gcRates, totalGC, RecombinationType::GeneConversion);
             else
-                nEvents += recombineEvent(drRate, totalDR, RecombinationType::DoubleRecombination);
+                nEvents += recombineEvent(drRates, totalDR, RecombinationType::DoubleRecombination);
         }
     }
     else { // Simulation is running gen-by-gen
