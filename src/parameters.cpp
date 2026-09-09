@@ -427,18 +427,18 @@ void Parameters::setCarriers()
     }
 }
 
-void Parameters::setPhi()
-{
-    if (paramData->randPhi)
-    {
-        double phiExponent = randreal(paramData->phi_range[0], paramData->phi_range[1]);
-        paramData->phi = pow(10, phiExponent);
-    }
-    else
-    {
-        paramData->phi = paramData->phi_range[0];
-    }
-}
+// void Parameters::setPhi()
+// {
+//     if (paramData->randPhi)
+//     {
+//         double phiExponent = randreal(paramData->phi_range[0], paramData->phi_range[1]);
+//         paramData->phi = pow(10, phiExponent);
+//     }
+//     else
+//     {
+//         paramData->phi = paramData->phi_range[0];
+//     }
+// }
 
 void Parameters::setSNPs()
 {

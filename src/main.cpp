@@ -197,7 +197,7 @@ int main(int argc, const char *argv[])
 
         resetMigrationSchedule();
         
-        params.setPhi();
+        // params.setPhi();
         params.setSNPs();
         params.setCarriers();
         unsigned nCarriers = params.paramData->initChr.size();
