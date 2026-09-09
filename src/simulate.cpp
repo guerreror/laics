@@ -57,13 +57,15 @@ unsigned short World::simulateGeneration(vector < vector <double> > & mig_prob){
     vector<double> cRate;
     vector<double> rRate;
     vector<double> hRate;
-    vector<double> dRate;
+    vector<double> drRate;
+    vector<double> gcRate;
     
     double totalM=0;
     double totalC=0;
     double totalR=0;
     double totalH=0;
-    double totalD=0;
+    double totalDR=0;
+    double totalGC=0;
     
     for( cluster_t::iterator i = cluster.begin(); i != cluster.end(); ++i ) {
         Context cxt =i->first;
@@ -125,10 +127,16 @@ unsigned short World::simulateGeneration(vector < vector <double> > & mig_prob){
             }
             
             for(int carrierID = 0; carrierID < k; ++carrierID){
-                double doubrec = (1-freqI)* worldData->phi;
-                dRate.push_back( doubrec );
-                totalD += doubrec;
-                CDBG("				doubrec = " <<doubrec)
+                const double carrierGcRate = (1-freqI)*worldData->gcRate;
+                const double carrierDrRate = (1-freqI)*worldData->drRate;
+                
+                gcRate.push_back(carrierGcRate);
+                drRate.push_back(carrierDrRate);
+
+                totalGC += carrierGcRate;
+                totalDR += carrierDrRate;
+                CDBG("				gc = " <<carrierGcRate)
+                CDBG("				dr = " <<carrierDrRate)
                 
             }
             
@@ -139,7 +147,7 @@ unsigned short World::simulateGeneration(vector < vector <double> > & mig_prob){
     ///////////////////
     
     int nEvents=0;
-    double Rate= totalM+ totalC+ totalR+ totalH + totalD;
+    double Rate= totalM+ totalC+ totalR+ totalH + totalDR + totalGC;
     double waiting_t= randexp(Rate);
     
     CDBG("total Rate ="<<Rate)
@@ -154,9 +162,12 @@ unsigned short World::simulateGeneration(vector < vector <double> > & mig_prob){
             CDBG("event = "<<event<<"\n")
             if (event < totalM/Rate) nEvents+= migrateEvent(migmap, mRate, totalM);
             else if (event < (totalM+totalC)/Rate) nEvents+=coalesceEvent(cRate, totalC);
-            else if (event < (totalM+totalC+totalR)/Rate)			nEvents+= recombineEvent(rRate, totalR, false, false);
-            else if (event < (totalM+totalC+totalR+totalH)/Rate)	nEvents+= recombineEvent(hRate, totalH, true, false);
-            else													nEvents+= recombineEvent(dRate, totalD, true, true);
+            else if (event < (totalM+totalC+totalR)/Rate)			nEvents+= recombineEvent(rRate, totalR, RecombinationType::Homokaryotypic);
+            else if (event < (totalM+totalC+totalR+totalH)/Rate)	nEvents+= recombineEvent(hRate, totalH, RecombinationType::Heterokaryotypic);
+            else if (event < (totalM+totalC+totalR+totalH+totalGC)/Rate)
+                nEvents += recombineEvent(gcRate, totalGC, RecombinationType::GeneConversion);
+            else
+                nEvents += recombineEvent(drRate, totalDR, RecombinationType::DoubleRecombination);
         }
     }
     else { // Simulation is running gen-by-gen
@@ -511,7 +522,7 @@ unsigned short World::coalesceEvent(vector<double>& rate, double total){
         return 1;
     }
 }//************************************end of coalesceEvent()
-unsigned short World::recombineEvent(vector<double>& rate, double total, bool hetero, bool gflux ){
+unsigned short World::recombineEvent(vector<double>& rate, double total, RecombinationType type){
     
     /*
      // this function runs one recombination event between a carrier and a non-carrier
@@ -545,7 +556,8 @@ unsigned short World::recombineEvent(vector<double>& rate, double total, bool he
      
      */
     
-    RCDBG( "Recombination (hetero= "<<(int)hetero<<", double ="<<(int) gflux <<") happened in gen "<<nGenerations())
+    RCDBG("Recombination type " << static_cast<int>(type)
+          << " happened in gen " << nGenerations())
     
     if (total <= 0) return 0;
 
@@ -593,7 +605,7 @@ unsigned short World::recombineEvent(vector<double>& rate, double total, bool he
     shared_ptr<Chromosome> chrom = carriers[chosenCluster][chosenCarrier];			// Get the recombining carrier
     
     // create new chromosome
-    shared_ptr<Chromosome> chrom2 = recomb_Wrap(chrom, hetero, gflux);
+    shared_ptr<Chromosome> chrom2 = recomb_Wrap(chrom, type);
     
     carriers[chosenCluster].erase(carriers[chosenCluster].begin() + chosenCarrier); //erase chrom from old context
     
@@ -611,7 +623,7 @@ unsigned short World::recombineEvent(vector<double>& rate, double total, bool he
     
 }
 
-shared_ptr<Chromosome> World::recomb_Wrap(shared_ptr<Chromosome> chrom, bool hetero, bool gflux){
+shared_ptr<Chromosome> World::recomb_Wrap(shared_ptr<Chromosome> chrom, RecombinationType type){
     
     // Make a new ARG node
     //
@@ -624,11 +636,15 @@ shared_ptr<Chromosome> World::recomb_Wrap(shared_ptr<Chromosome> chrom, bool het
 
     // Make two recombinant chromosomes	
     shared_ptr<Chromosome> chrom2;
+    const bool hetero = type != RecombinationType::Homokaryotypic;
+    const bool geneFlux =
+        type == RecombinationType::GeneConversion ||
+        type == RecombinationType::DoubleRecombination;
     int h= static_cast<int> (hetero); if (chrom->getInv()==h) {h=0;} else {h=1;}
     Context other_ctx (chrom->getPopulation(), h);				
     const int inv2_before = other_ctx.inversion;
     
-    if(gflux){
+    if(geneFlux){
         double mid= (worldData->invRange.R - worldData->invRange.L)/2 + worldData->invRange.L;
         double bp1= randreal(worldData->invRange.L, mid);
         double bp2= randreal(mid, worldData->invRange.R);
@@ -667,3 +683,56 @@ shared_ptr<Chromosome> World::recomb_Wrap(shared_ptr<Chromosome> chrom, bool het
     
     return chrom2;
 }
+
+
+
+
+// static std::string pickGeneFluxType_SMC(double x, const Parameters::ParameterData& params) {
+//     const double gcHeight = std::max(0.0, params.gcRate);
+//     const double drHeight = triangleHeightAtX_SMC(x, params.smcRange, std::max(0.0, params.drRate));
+//     const double totalHeight = gcHeight + drHeight;
+//     if (totalHeight <= 0.0) return "GC";
+
+//     const double u = randreal(0.0, totalHeight);
+//     return (u < gcHeight) ? "GC" : "DR";
+// } 
+
+// static double drawDoubleRecombinationEnd_SMC(double startX, const Segment& range) {
+//     const double mid = 0.5 * (range.L + range.R);
+//     const double lower = std::max(startX, mid);
+//     const double upper = range.R;
+//     if (upper <= lower) return upper;
+//     return randreal(lower, upper);
+// }
+
+// static GeneFluxEvent_SMC makeGeneFluxSegment_SMC(double startX,
+//                                                  unsigned long nodeId,
+//                                                  const std::string& type,
+//                                                  const Parameters::ParameterData& params) {
+//     GeneFluxEvent_SMC evt;
+//     evt.startX = std::max(params.smcRange.L, std::min(params.smcRange.R, startX));
+//     evt.nodeId = nodeId;
+//     evt.type = type;
+
+//     if (type == "DR") {
+//         evt.endX = drawDoubleRecombinationEnd_SMC(evt.startX, params.smcRange);
+//     } else {
+//         const double J = drawGeneFluxSegmentLength_SMC(evt.startX);
+//         evt.endX = evt.startX + J;
+//     }
+//     evt.endX = std::max(evt.startX, std::min(params.smcRange.R, evt.endX));
+//     return evt;
+// }
+
+
+// static double triangleHeightAtX_SMC(double x, const Segment& range, double peakHeight) {
+//     const double L = range.L;
+//     const double R = range.R;
+//     if (R <= L || x <= L || x >= R) return 0.0;
+
+//     const double mid = 0.5 * (L + R);
+//     if (x <= mid) {
+//         return peakHeight * ((x - L) / (mid - L));
+//     }
+//     return peakHeight * ((R - x) / (R - mid));
+// }

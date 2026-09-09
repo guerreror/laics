@@ -46,7 +46,14 @@ class World {
 	cluster_t cluster;
 	
 public:
-	World(shared_ptr<Parameters::ParameterData> p);		
+	enum class RecombinationType {
+		Homokaryotypic,
+		Heterokaryotypic,
+		GeneConversion,
+		DoubleRecombination
+	};
+
+	World(shared_ptr<Parameters::ParameterData> p);
 	~World();
 	void makecluster (unsigned long nPops);
 	bool simulationFinished();				// Returns true if the simulation is finishe
@@ -59,7 +66,7 @@ public:
 	unsigned long popNcarriers(unsigned long pop);				//	total number of carriers in a given population
 	unsigned short  migrateEvent(vector < vector< double> >& mig_prob, vector<double>& rate, double total);
 	unsigned short  coalesceEvent(vector<double>& rate, double total);
-	unsigned short  recombineEvent(vector<double>& rate, double total, bool hetero, bool gflux);
+	unsigned short recombineEvent(vector<double>& rate, double total, RecombinationType type);
 	unsigned short  doubrecEvent(vector<double>& rate, double total);
 	unsigned short  simulateGeneration(vector< vector< double > >& mig_prob);
 	unsigned short  simulateGeneration_SMC(vector< vector< double > >& mig_prob);
@@ -85,7 +92,7 @@ public:
     void demoChange();
     void speciation();
 	void rebuildClustersAndCarriers();
-	shared_ptr< Chromosome> recomb_Wrap(shared_ptr<Chromosome> chrom, bool hetero, bool gflux);
+	shared_ptr<Chromosome> recomb_Wrap(shared_ptr<Chromosome> chrom, RecombinationType type);
 	void recordContextFlip(shared_ptr<Chromosome> chrom);
     vector< shared_ptr < ARGNode > > initialARGnodes; //public vector of pointers to the original ARG nodes. For use in output of sample
     

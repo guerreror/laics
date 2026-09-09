@@ -90,7 +90,7 @@ World::World(shared_ptr<Parameters::ParameterData> p){
 //	worldData->phi=p->phi;
 	worldData->drRate=p->drRate;
 	worldData->gcRate=p->gcRate;
-	worldData->basesPerMorgan=p->basesPerMorgan;
+	worldData->basesPerMorgan=p->BasesPerMorgan;
 	worldData->freq=p->initialFreqs;
 
     worldData->freq.resize(nClust);
