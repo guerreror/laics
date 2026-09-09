@@ -643,14 +643,11 @@ shared_ptr<Chromosome> World::recomb_Wrap(shared_ptr<Chromosome> chrom, Recombin
     // Make two recombinant chromosomes	
     shared_ptr<Chromosome> chrom2;
     const bool hetero = type != RecombinationType::Homokaryotypic;
-    const bool geneFlux =
-        type == RecombinationType::GeneConversion ||
-        type == RecombinationType::DoubleRecombination;
     int h= static_cast<int> (hetero); if (chrom->getInv()==h) {h=0;} else {h=1;}
     Context other_ctx (chrom->getPopulation(), h);				
     const int inv2_before = other_ctx.inversion;
     
-    if(geneFlux){
+    if(type == RecombinationType::DoubleRecombination){
         double mid= (worldData->invRange.R - worldData->invRange.L)/2 + worldData->invRange.L;
         double bp1= randreal(worldData->invRange.L, mid);
         double bp2= randreal(mid, worldData->invRange.R);
@@ -667,6 +664,14 @@ shared_ptr<Chromosome> World::recomb_Wrap(shared_ptr<Chromosome> chrom, Recombin
          cout<<"StdSegs ";for(int i=0;i<chrom->get_Std_Segs().size();++i)cout<<chrom->get_Std_Segs().at(i).L<<" ";
          cout<<"StdSegs2 ";for(int i=0;i<chrom2->get_Std_Segs().size();++i)cout<<chrom2->get_Std_Segs().at(i).L<<" ";cout<<'\n';
          */
+    }
+    else if(type == RecombinationType::GeneConversion){
+        constexpr double gcTractLengthBp = 200.0;
+        const double bp1 = randreal(worldData->invRange.L, worldData->invRange.R);
+        const double gcTractLength = gcTractLengthBp / worldData->basesPerMorgan;
+        const double bp2 = std::min(bp1 + gcTractLength, worldData->invRange.R);
+
+        chrom2 = chrom->doubrecombine(bp1, bp2, newNode, other_ctx, worldData->invRange);
     }
     else{
         double breakpoint= chrom->calcBreakpoint(worldData->invRange, hetero);

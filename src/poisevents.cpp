@@ -157,6 +157,9 @@ unsigned short World::recombine_all(){
     //  Modified into recombine_all() by RG (III-16), does gene flux, heterokaryotypic, and homokaryotipic events.
     
 	int events=0;
+	const double inversionLengthBp =
+		(worldData->invRange.R - worldData->invRange.L) *
+		worldData->basesPerMorgan;
 	
 	vector< shared_ptr < Chromosome> > recombinants;
 	
@@ -169,8 +172,10 @@ unsigned short World::recombine_all(){
             double  freqI = getFreqI(i->first.pop);
             if (i->first.inversion==0) freqI= 1- freqI;
 
-			double drRate = (1-freqI)* worldData->drRate;
-			double gcRate = (1-freqI)* worldData->gcRate;
+			const double oppositeFrequency = 1.0 - freqI;
+			double drRate = oppositeFrequency * worldData->drRate;
+			double gcRate =
+				oppositeFrequency * worldData->gcRate * inversionLengthBp;
             double hetRate = (1- freqI)* chrom->getHeteroLength(worldData->invRange);
             double homRate = freqI * chrom->getHomoLength(worldData->invRange);
 	
@@ -179,7 +184,7 @@ unsigned short World::recombine_all(){
 			if (x < (drRate + gcRate + hetRate + homRate)){
 				events++;
 				
-                RecombinationType type = RecombinationType::Homokaryotypic;
+                RecombinationType type;
                 if (x < gcRate) {
                     type = RecombinationType::GeneConversion;
                 }
@@ -188,6 +193,9 @@ unsigned short World::recombine_all(){
                 }
                 else if (x < gcRate + drRate + hetRate) {
                     type = RecombinationType::Heterokaryotypic;
+                }
+                else {
+                    type = RecombinationType::Homokaryotypic;
                 }
                 
 				// creat new chromosome
