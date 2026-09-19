@@ -35,12 +35,9 @@ static void recordEventRow_SMC(SMCStepOutcome* outcome,
                                double currentHopX,
                                const std::string& eventName,
                                double eventTime) {
-    std::ostringstream row;
-    row << hopIndex << "," << currentHopX << "," << eventName << ","
-        << eventTime << ",,,\n";
-    if (evlog.is_open()) {
-        evlog << runIndex << "," << row.str();
-    }
+    if (!evlog.is_open()) return;
+    evlog << runIndex << "," << hopIndex << "," << currentHopX << ","
+          << eventName << "," << eventTime << ",,,\n";
 }
 
 static void gatherTimes_SMC(TreeNode* node, std::vector<double>& out) {
@@ -105,7 +102,7 @@ static bool nextMigrationMatrixTimeAfter_SMC(
 static double computeTotalC_SMC(const Parameters::ParameterData& params,
                                 double t,
                                 unsigned int pop) {
-    const SMCActiveState state = activeStateAtTime_SMC(params, t);
+    const SMCActiveState& state = activeStateAtTime_SMC(params, t);
     if (pop >= state.popSizes.size() || state.popSizes[pop] == 0) return 0.0;
     return 1.0 / static_cast<double>(state.popSizes[pop]);
 }
@@ -132,7 +129,7 @@ static double computeTotalG_SMC(const TreeNode* cutRoot,
         return 0.0;
     }
     const unsigned int pop = cutRoot->context.pop;
-    const SMCActiveState state = activeStateAtTime_SMC(params, t);
+    const SMCActiveState& state = activeStateAtTime_SMC(params, t);
     if (pop >= state.invFreqs.size()) return 0.0;
 
     const double localPhi =
@@ -144,10 +141,6 @@ static double computeTotalG_SMC(const TreeNode* cutRoot,
         return localPhi * invFreq;
     }
     return localPhi * stdFreq;
-}
-
-static double drawGeneFluxSegmentLength_SMC(double /*currentHopX*/) {
-    return 200.0;
 }
 
 static double triangleHeightAtX_SMC(double x, const Segment& range, double peakHeight) {
@@ -192,7 +185,7 @@ static GeneFluxEvent_SMC makeGeneFluxSegment_SMC(double startX,
     if (type == "DR") {
         evt.endX = drawDoubleRecombinationEnd_SMC(evt.startX, params.smcRange);
     } else {
-        const double J = drawGeneFluxSegmentLength_SMC(evt.startX);
+        const double J = std::max(0.0, params.tractSize);
         evt.endX = evt.startX + J;
     }
     evt.endX = std::max(evt.startX, std::min(params.smcRange.R, evt.endX));

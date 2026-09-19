@@ -1,0 +1,30 @@
+# SMC control ported from the former unified parameters.yaml.
+Seed: "0"
+NumberOfReplicates: "1"
+
+KingmanCoal: "1"
+DriftSimulation: "0"
+MSOutput: "0"
+
+# One value per present-day population in demes.yaml.
+InversionFrequency: "0.1 0.3"
+AncestorFrequencies:
+  root: "0.6"
+InversionAge: "1300000"
+
+BasesPerMorgan: "1e8"
+InversionRange: "0 8000000"
+
+RandomSample: "0"
+Samples:
+  pop0: "0 10"  
+  pop1: "0 10"  
+
+SMC: "1"
+Verbose: "0"
+TargetSNPs: ""
+
+# No gene flux in this SNM control.
+GeneConversionRate: "0.000004"
+DoubleRecombinationRate: "0.0002"
+TractSize: "200"

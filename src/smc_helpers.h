@@ -13,7 +13,7 @@ struct SMCActiveState {
     std::vector<double> invFreqs;
 };
 
-SMCActiveState activeStateAtTime_SMC(const Parameters::ParameterData& params, double t);
+const SMCActiveState& activeStateAtTime_SMC(const Parameters::ParameterData& params, double t);
 
 // Writes a visualization-only collapsed tree:
 // unary chains are contracted, while coalescent/branching nodes and leaves remain.

@@ -7,9 +7,7 @@ import argparse
 import re
 import random
 import json
-import gzip
 import os
-import shutil
 from collections import defaultdict, deque
 
 # ---------- File paths ----------
@@ -55,8 +53,7 @@ parameters = {
     "target_snp":   "",
     "gc":           "1.0",
     "dr":           "1.0",
-    "csvSnapshots": "0",
-    "binarySnapshots": "1",
+    "tractSize":    "200",
     "hopInformation": "0",
 }
 
@@ -81,8 +78,7 @@ YAML_KEY_ALIASES = {
     "TargetSNPs": "target_snp",
     "GeneConversionRate": "gc",
     "DoubleRecombinationRate": "dr",
-    "CSVSnapshots": "csvSnapshots",
-    "BinarySnapshots": "binarySnapshots",
+    "TractSize": "tractSize",
     "HopInformation": "hopInformation",
 }
 
@@ -111,8 +107,7 @@ DISPLAY_KEY_NAMES = {
     "target_snp": "TargetSNPs",
     "gc": "GeneConversionRate",
     "dr": "DoubleRecombinationRate",
-    "csvSnapshots": "CSVSnapshots",
-    "binarySnapshots": "BinarySnapshots",
+    "tractSize": "TractSize",
     "hopInformation": "HopInformation",
 }
 
@@ -656,8 +651,7 @@ if smc_flag == "1":
         parameters["target_snp"],
         parameters["gc"],
         parameters["dr"],
-        parameters["csvSnapshots"],
-        parameters["binarySnapshots"],
+        parameters["tractSize"],
         parameters["hopInformation"],
     ]
 
@@ -694,12 +688,3 @@ write_output_log = (
 if write_output_log:
     with open("Output_log.txt", "w") as log_file:
         log_file.writelines(stderr_lines)
-
-if smc_flag == "1" and parameters.get("binarySnapshots", "0").strip() == "1":
-    raw_snapshot = "smc_tree_snapshots.bin"
-    gz_snapshot = raw_snapshot + ".gz"
-    if os.path.isfile(raw_snapshot):
-        with open(raw_snapshot, "rb") as src, gzip.open(gz_snapshot, "wb", compresslevel=6) as dst:
-            shutil.copyfileobj(src, dst)
-        os.remove(raw_snapshot)
-        print(f"Compressed {raw_snapshot} -> {gz_snapshot}")

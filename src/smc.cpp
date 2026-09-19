@@ -19,8 +19,14 @@
 #include <iomanip>
 #include <cstdint>
 #include <cstring>
+#include <stdexcept>
+#include <future>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <sys/stat.h>
+
+#include <tskit/tables.h>
 
 using namespace std;
 
@@ -288,7 +294,7 @@ static void collectEdgeWeightsFromTree(
             branchingAncestor && branchingAncestor->children.size() > 1;
 
         const unsigned int pop = child->context.pop;
-        const SMCActiveState state = activeStateAtTime_SMC(params, child->time);
+        const SMCActiveState& state = activeStateAtTime_SMC(params, child->time);
         if (leavesRetainedTree && pop < state.popSizes.size() && pop < state.invFreqs.size()) {
             const double pI = state.invFreqs[pop];
             const double branchL = node->time - child->time;
@@ -343,49 +349,7 @@ static void writeTreeArtifacts(TreeNode* tree, const std::string& base)
     }
 }
 
-static void writeTreeSnapshotCSVRows(std::ofstream& out,
-                                     TreeNode* node,
-                                     int run,
-                                     int hop,
-                                     double xStart,
-                                     double xEnd,
-                                     long long parentId)
-{
-    if (!node) return;
-    out << run << ","
-        << hop << ","
-        << std::setprecision(17) << xStart << ","
-        << std::setprecision(17) << xEnd << ","
-        << node->id << ","
-        << parentId << ","
-        << std::setprecision(17) << node->time << ","
-        << node->context.pop << ","
-        << node->context.inversion << "\n";
-    for (auto* child : node->children) {
-        writeTreeSnapshotCSVRows(out, child, run, hop, xStart, xEnd,
-                                 static_cast<long long>(node->id));
-    }
-}
-
-static void appendTreeSnapshotCSV(std::ofstream& out,
-                                  TreeNode* tree,
-                                  int run,
-                                  int hop,
-                                  double xStart,
-                                  double xEnd)
-{
-    if (!out.is_open()) return;
-    writeTreeSnapshotCSVRows(out, tree, run, hop, xStart, xEnd, -1);
-}
-
-template <typename T>
-static void packBinaryValue(char* buffer, size_t& offset, const T& value)
-{
-    std::memcpy(buffer + offset, &value, sizeof(T));
-    offset += sizeof(T);
-}
-
-struct SnapshotNodeRecord {
+struct TskitCNodeRecord {
     int32_t run;
     uint64_t id;
     double time;
@@ -393,7 +357,7 @@ struct SnapshotNodeRecord {
     uint16_t inversion;
 };
 
-struct SnapshotEdgeRecord {
+struct TskitCEdgeInterval {
     int32_t run;
     double left;
     double right;
@@ -401,34 +365,53 @@ struct SnapshotEdgeRecord {
     uint64_t child;
 };
 
-struct SnapshotIntervalRecord {
+struct TskitCNodeKey {
     int32_t run;
-    int32_t hop;
-    double left;
-    double right;
+    uint64_t id;
+    bool operator==(const TskitCNodeKey& other) const {
+        return run == other.run && id == other.id;
+    }
 };
 
-struct SnapshotBinaryStore {
-    std::vector<SnapshotNodeRecord> nodes;
-    std::vector<SnapshotEdgeRecord> edges;
-    std::vector<SnapshotIntervalRecord> intervals;
-    std::unordered_set<std::string> seenNodes;
-    std::unordered_map<std::string, size_t> openEdges;
-    bool enabled = false;
-
-    static std::string nodeKey(int run, uint64_t nodeId) {
-        return std::to_string(run) + ":" + std::to_string(nodeId);
+struct TskitCEdgeKey {
+    int32_t run;
+    uint64_t parent;
+    uint64_t child;
+    bool operator==(const TskitCEdgeKey& other) const {
+        return run == other.run && parent == other.parent && child == other.child;
     }
+};
 
-    static std::string edgeKey(int run, uint64_t parent, uint64_t child) {
-        return std::to_string(run) + ":" + std::to_string(parent) + ":" + std::to_string(child);
+struct TskitCKeyHash {
+    size_t operator()(const TskitCNodeKey& k) const {
+        return std::hash<uint64_t>()((static_cast<uint64_t>(k.run) << 32) ^ k.id);
+    }
+    size_t operator()(const TskitCEdgeKey& k) const {
+        uint64_t h = (static_cast<uint64_t>(k.run) << 32) ^ k.parent;
+        h ^= k.child + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+        return std::hash<uint64_t>()(h);
+    }
+};
+
+struct TskitCStore {
+    std::vector<TskitCNodeRecord> nodes;
+    std::vector<TskitCEdgeInterval> edges;
+    std::unordered_set<TskitCNodeKey, TskitCKeyHash> seenNodes;
+    std::unordered_map<TskitCEdgeKey, size_t, TskitCKeyHash> openEdges;
+    std::unordered_set<TskitCEdgeKey, TskitCKeyHash> activeEdges;
+    bool enabled = true;
+
+    static void checkTsk(int ret, const char* where) {
+        if (ret < 0) {
+            throw std::runtime_error(std::string(where) + ": " + tsk_strerror(ret));
+        }
     }
 
     void collect(TreeNode* node, int run, double left, double right,
-                 std::unordered_set<std::string>& activeEdges) {
+                 std::unordered_set<TskitCEdgeKey, TskitCKeyHash>& activeEdges) {
         if (!node) return;
         const uint64_t nodeId = static_cast<uint64_t>(node->id);
-        const std::string nk = nodeKey(run, nodeId);
+        const TskitCNodeKey nk{static_cast<int32_t>(run), nodeId};
         if (seenNodes.insert(nk).second) {
             nodes.push_back({static_cast<int32_t>(run), nodeId, node->time,
                              static_cast<uint32_t>(node->context.pop),
@@ -437,7 +420,7 @@ struct SnapshotBinaryStore {
         for (auto* child : node->children) {
             if (!child) continue;
             const uint64_t childId = static_cast<uint64_t>(child->id);
-            const std::string ek = edgeKey(run, nodeId, childId);
+            const TskitCEdgeKey ek{static_cast<int32_t>(run), nodeId, childId};
             activeEdges.insert(ek);
             if (right > left) {
                 auto it = openEdges.find(ek);
@@ -447,21 +430,18 @@ struct SnapshotBinaryStore {
                     edges.push_back({static_cast<int32_t>(run), left, right, nodeId, childId});
                     openEdges[ek] = edges.size() - 1;
                 }
-            } else {
-                edges.push_back({static_cast<int32_t>(run), left, right, nodeId, childId});
             }
             collect(child, run, left, right, activeEdges);
         }
     }
 
-    void append(TreeNode* tree, int run, int hop, double left, double right) {
+    void append(TreeNode* tree, int run, int /*hop*/, double left, double right) {
         if (!enabled || !tree) return;
-        intervals.push_back({static_cast<int32_t>(run), static_cast<int32_t>(hop), left, right});
-        std::unordered_set<std::string> activeEdges;
+        activeEdges.clear();
+        activeEdges.reserve(openEdges.size() + 32);
         collect(tree, run, left, right, activeEdges);
         for (auto it = openEdges.begin(); it != openEdges.end();) {
-            const bool sameRun = it->first.find(std::to_string(run) + ":") == 0;
-            if (sameRun && activeEdges.find(it->first) == activeEdges.end()) {
+            if (it->first.run == run && activeEdges.find(it->first) == activeEdges.end()) {
                 it = openEdges.erase(it);
             } else {
                 ++it;
@@ -469,44 +449,126 @@ struct SnapshotBinaryStore {
         }
     }
 
-    template <typename T>
-    static void writeValue(std::ofstream& out, const T& value) {
-        out.write(reinterpret_cast<const char*>(&value), sizeof(T));
+    void finishRun(int run) {
+        for (auto it = openEdges.begin(); it != openEdges.end();) {
+            if (it->first.run == run) it = openEdges.erase(it);
+            else ++it;
+        }
     }
 
-    void write(const std::string& path) const {
-        if (!enabled) return;
-        std::ofstream out(path.c_str(), std::ios::binary);
-        if (!out.is_open()) return;
-        const char magic[8] = {'S','M','C','T','S','2','\0','\0'};
-        out.write(magic, sizeof(magic));
-        const uint64_t nNodes = nodes.size();
-        const uint64_t nEdges = edges.size();
-        const uint64_t nIntervals = intervals.size();
-        writeValue(out, nNodes);
-        writeValue(out, nEdges);
-        writeValue(out, nIntervals);
+    void writeRun(const std::vector<const TskitCNodeRecord*>& runNodes,
+                  const std::vector<const TskitCEdgeInterval*>& runEdges,
+                  const std::string& outPath) const {
+        std::unordered_map<uint64_t, const TskitCNodeRecord*> allNodes;
+        allNodes.reserve(runNodes.size());
+        for (const auto* n : runNodes) allNodes[n->id] = n;
 
-        for (const auto& n : nodes) {
-            writeValue(out, n.run);
-            writeValue(out, n.id);
-            writeValue(out, n.time);
-            writeValue(out, n.pop);
-            writeValue(out, n.inversion);
+        std::unordered_map<uint64_t, TskitCNodeRecord> usedNodes;
+        double sequenceLength = 0.0;
+        uint32_t maxPop = 0;
+        for (const auto* edge : runEdges) {
+            const auto& e = *edge;
+            if (e.right <= e.left) continue;
+            sequenceLength = std::max(sequenceLength, e.right);
+            const auto parentIt = allNodes.find(e.parent);
+            const auto childIt = allNodes.find(e.child);
+            if (parentIt != allNodes.end()) {
+                usedNodes[e.parent] = *parentIt->second;
+                maxPop = std::max(maxPop, parentIt->second->pop);
+            }
+            if (childIt != allNodes.end()) {
+                usedNodes[e.child] = *childIt->second;
+                maxPop = std::max(maxPop, childIt->second->pop);
+            }
         }
-        for (const auto& e : edges) {
-            writeValue(out, e.run);
-            writeValue(out, e.left);
-            writeValue(out, e.right);
-            writeValue(out, e.parent);
-            writeValue(out, e.child);
+        if (sequenceLength <= 0.0 || usedNodes.empty()) return;
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (const auto* edge : runEdges) {
+                const auto& e = *edge;
+                if (e.right <= e.left) continue;
+                if (usedNodes[e.parent].time <= usedNodes[e.child].time) {
+                    usedNodes[e.parent].time = usedNodes[e.child].time + 1e-9;
+                    changed = true;
+                }
+            }
         }
-        for (const auto& i : intervals) {
-            writeValue(out, i.run);
-            writeValue(out, i.hop);
-            writeValue(out, i.left);
-            writeValue(out, i.right);
+
+        tsk_table_collection_t tables;
+        checkTsk(tsk_table_collection_init(&tables, 0), "tsk_table_collection_init");
+        tables.sequence_length = sequenceLength;
+        const char timeUnits[] = "generations";
+        checkTsk(tsk_table_collection_set_time_units(
+                     &tables, timeUnits, static_cast<tsk_size_t>(strlen(timeUnits))),
+                 "tsk_table_collection_set_time_units");
+
+        for (uint32_t pop = 0; pop <= maxPop; ++pop) {
+            checkTsk(tsk_population_table_add_row(&tables.populations, NULL, 0),
+                     "tsk_population_table_add_row");
         }
+
+        std::unordered_map<uint64_t, tsk_id_t> rowFor;
+        std::vector<uint64_t> ids;
+        for (const auto& kv : usedNodes) ids.push_back(kv.first);
+        std::sort(ids.begin(), ids.end());
+        for (uint64_t id : ids) {
+            const auto& n = usedNodes[id];
+            const tsk_flags_t flags = (std::abs(n.time) <= 1e-12) ? TSK_NODE_IS_SAMPLE : 0;
+            const tsk_id_t row = tsk_node_table_add_row(
+                &tables.nodes, flags, n.time, static_cast<tsk_id_t>(n.pop),
+                TSK_NULL, NULL, 0);
+            checkTsk(row, "tsk_node_table_add_row");
+            rowFor[id] = row;
+        }
+
+        for (const auto* edge : runEdges) {
+            const auto& e = *edge;
+            if (e.right <= e.left) continue;
+            const tsk_id_t row = tsk_edge_table_add_row(
+                &tables.edges, e.left, e.right, rowFor[e.parent], rowFor[e.child], NULL, 0);
+            checkTsk(row, "tsk_edge_table_add_row");
+        }
+
+        const char timestamp[] = "generated-by-laics-smc";
+        const char record[] = "{\"software\":\"laics-smc\",\"writer\":\"tskit-c-api\"}";
+        checkTsk(tsk_provenance_table_add_row(
+                     &tables.provenances, timestamp, static_cast<tsk_size_t>(strlen(timestamp)),
+                     record, static_cast<tsk_size_t>(strlen(record))),
+                 "tsk_provenance_table_add_row");
+        checkTsk(tsk_table_collection_sort(&tables, NULL, 0), "tsk_table_collection_sort");
+        checkTsk(tsk_table_collection_build_index(&tables, 0), "tsk_table_collection_build_index");
+        checkTsk(tsk_table_collection_dump(&tables, outPath.c_str(), 0), "tsk_table_collection_dump");
+        tsk_table_collection_free(&tables);
+    }
+
+    void write(const std::string& outDir) const {
+        if (!enabled) return;
+        mkdir(outDir.c_str(), 0755);
+        std::unordered_map<int, std::vector<const TskitCNodeRecord*>> nodesByRun;
+        std::unordered_map<int, std::vector<const TskitCEdgeInterval*>> edgesByRun;
+        for (const auto& n : nodes) nodesByRun[n.run].push_back(&n);
+        for (const auto& e : edges) edgesByRun[e.run].push_back(&e);
+
+        std::vector<int> runs;
+        runs.reserve(edgesByRun.size());
+        for (const auto& kv : edgesByRun) runs.push_back(kv.first);
+        std::sort(runs.begin(), runs.end());
+        const unsigned int hw = std::thread::hardware_concurrency();
+        const size_t maxWorkers = std::max<size_t>(1, std::min<size_t>(4, hw ? hw : 2));
+        std::vector<std::future<void>> jobs;
+        for (int run : runs) {
+            jobs.push_back(std::async(std::launch::async, [this, &nodesByRun, &edgesByRun, outDir, run]() {
+                writeRun(nodesByRun[run],
+                         edgesByRun[run],
+                         outDir + "/smc_tree_sequence_run" + std::to_string(run) + ".trees");
+            }));
+            if (jobs.size() >= maxWorkers) {
+                jobs.front().get();
+                jobs.erase(jobs.begin());
+            }
+        }
+        for (auto& job : jobs) job.get();
     }
 };
 
@@ -619,15 +681,7 @@ int main(int argc, const char *argv[])
     if (hopEvents.is_open()) {
         hopEvents << "run,hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
     }
-    std::ofstream treeSnapshotsCSV;
-    if (params.paramData->csvSnapshots) {
-        treeSnapshotsCSV.open("smc_tree_snapshots.csv");
-    }
-    if (treeSnapshotsCSV.is_open()) {
-        treeSnapshotsCSV << "run,hop,x_start,x_end,node_id,parent_id,time,pop,inversion\n";
-    }
-    SnapshotBinaryStore treeSnapshotsBin;
-    treeSnapshotsBin.enabled = params.paramData->binarySnapshots;
+    TskitCStore treeSequences;
 
     for (int timer = 0; timer < (int)nRuns; ++timer)
     {
@@ -681,12 +735,13 @@ int main(int argc, const char *argv[])
         }
         unsigned long nextNodeId = getMaxId(activeTree) + 1;
         double currentX = startX;
-        appendTreeSnapshotCSV(treeSnapshotsCSV, activeTree, timer, 0, currentX, currentX);
-        treeSnapshotsBin.append(activeTree, timer, 0, currentX, currentX);
+        treeSequences.append(activeTree, timer, 0, currentX, currentX);
         vector<GeneFluxEvent_SMC> geneFluxActive;
         vector<GeneFluxEvent_SMC> geneFluxLog;
         vector<EdgeWeight> last_standard_edges;
         vector<EdgeWeight> last_inverted_edges;
+        vector<EdgeWeight> standard_edges;
+        vector<EdgeWeight> inverted_edges;
         vector<bool> targetEmitted(params.paramData->targetSNPs.size(), false);
         if (targetMode) {
             const double eps = 1e-15;
@@ -726,8 +781,8 @@ int main(int argc, const char *argv[])
                 break;
             }
 
-            vector<EdgeWeight> standard_edges;
-            vector<EdgeWeight> inverted_edges;
+            standard_edges.clear();
+            inverted_edges.clear();
             collectEdgeWeightsFromTree(activeTree,
                                        *params.paramData,
                                        r,
@@ -839,8 +894,7 @@ int main(int argc, const char *argv[])
             if (finalHopDelta <= 0.0) {
                 continue;
             }
-            appendTreeSnapshotCSV(treeSnapshotsCSV, activeTree, timer, hop + 1, currentX, nextX);
-            treeSnapshotsBin.append(activeTree, timer, hop + 1, currentX, nextX);
+            treeSequences.append(activeTree, timer, hop + 1, currentX, nextX);
 
             bool writeThisHop = writeAllDiagnostics;
             vector<double> targetsForThisHop;
@@ -968,12 +1022,13 @@ int main(int argc, const char *argv[])
             writeEdgeWeightsCSV(last_inverted_edges, "edge_weights_inverted.csv");
         }
 
+        treeSequences.finishRun(timer);
         delete world;
         printProgress(timer + 1, static_cast<int>(nRuns), progressBucket);
     }
 
     end = std::chrono::system_clock::now();
-    treeSnapshotsBin.write("smc_tree_snapshots.bin");
+    treeSequences.write("smc_trees");
     std::chrono::duration<double> elapsed_seconds = end - start;
     std::cerr << "Elapsed time: " << elapsed_seconds.count() << "s\n";
 
