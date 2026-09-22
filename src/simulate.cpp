@@ -26,6 +26,7 @@ using std::map;
 using std::pair;
 using std::make_pair;
 #include <algorithm>
+#include <limits>
 using std::max;
 using std::min;
 
@@ -149,6 +150,9 @@ unsigned short World::simulateGeneration(vector < vector <double> > & mig_prob){
         }
         else{vector<double> dum (1,0); migmap.push_back(dum);mRate.push_back(0);}
     }
+
+    worldData->diagnosticTotalGC = totalGC;
+    worldData->diagnosticTotalDR = totalDR;
     
     ///////////////////
     
@@ -642,6 +646,8 @@ shared_ptr<Chromosome> World::recomb_Wrap(shared_ptr<Chromosome> chrom, Recombin
 
     // Make two recombinant chromosomes	
     shared_ptr<Chromosome> chrom2;
+    double bp1 = std::numeric_limits<double>::quiet_NaN();
+    double bp2 = std::numeric_limits<double>::quiet_NaN();
     const bool hetero = type != RecombinationType::Homokaryotypic;
     int h= static_cast<int> (hetero); if (chrom->getInv()==h) {h=0;} else {h=1;}
     Context other_ctx (chrom->getPopulation(), h);				
@@ -649,8 +655,8 @@ shared_ptr<Chromosome> World::recomb_Wrap(shared_ptr<Chromosome> chrom, Recombin
     
     if(type == RecombinationType::DoubleRecombination){
         double mid= (worldData->invRange.R - worldData->invRange.L)/2 + worldData->invRange.L;
-        double bp1= randreal(worldData->invRange.L, mid);
-        double bp2= randreal(mid, worldData->invRange.R);
+        bp1 = randreal(worldData->invRange.L, mid);
+        bp2 = randreal(mid, worldData->invRange.R);
         /*	cout<<"bp1 "<<bp1<<", bp2 "<<bp2<<'\n'; 
          cout<<"before"<<'\n';
          cout<<"InvSegs ";for(int i=0;i<chrom->get_Inv_Segs().size();++i)cout<<chrom->get_Inv_Segs().at(i).L<<" "; cout<<'\n';
@@ -667,16 +673,54 @@ shared_ptr<Chromosome> World::recomb_Wrap(shared_ptr<Chromosome> chrom, Recombin
     }
     else if(type == RecombinationType::GeneConversion){
         constexpr double gcTractLengthBp = 200.0;
-        const double bp1 = randreal(worldData->invRange.L, worldData->invRange.R);
+        bp1 = randreal(worldData->invRange.L, worldData->invRange.R);
         const double gcTractLength = gcTractLengthBp / worldData->basesPerMorgan;
-        const double bp2 = std::min(bp1 + gcTractLength, worldData->invRange.R);
+        bp2 = std::min(bp1 + gcTractLength, worldData->invRange.R);
 
         chrom2 = chrom->doubrecombine(bp1, bp2, newNode, other_ctx, worldData->invRange);
     }
     else{
-        double breakpoint= chrom->calcBreakpoint(worldData->invRange, hetero);
-        chrom2 = chrom->recombine(breakpoint, newNode, other_ctx, worldData->invRange);	
+        bp1 = chrom->calcBreakpoint(worldData->invRange, hetero);
+        chrom2 = chrom->recombine(bp1, newNode, other_ctx, worldData->invRange);	
         
+    }
+
+    if (worldData->recombinationDiagnostics != nullptr &&
+        *worldData->recombinationDiagnostics) {
+        const char* eventTypeName = "unknown";
+        switch (type) {
+            case RecombinationType::Homokaryotypic:
+                eventTypeName = "homokaryotypic";
+                break;
+            case RecombinationType::Heterokaryotypic:
+                eventTypeName = "heterokaryotypic";
+                break;
+            case RecombinationType::GeneConversion:
+                eventTypeName = "gc";
+                break;
+            case RecombinationType::DoubleRecombination:
+                eventTypeName = "dr";
+                break;
+        }
+
+        const double bp1Bp = bp1 * worldData->basesPerMorgan;
+        const double bp2Bp = bp2 * worldData->basesPerMorgan;
+        const double tractLengthBp =
+            std::isnan(bp2)
+                ? std::numeric_limits<double>::quiet_NaN()
+                : (bp2 - bp1) * worldData->basesPerMorgan;
+
+        *worldData->recombinationDiagnostics
+            << worldData->diagnosticReplicate << ','
+            << worldData->generation << ','
+            << eventTypeName << ','
+            << (inv_before == 0 ? "standard" : "inverted") << ','
+            << (other_ctx.inversion == 0 ? "standard" : "inverted") << ','
+            << bp1Bp << ','
+            << bp2Bp << ','
+            << tractLengthBp << ','
+            << worldData->diagnosticTotalGC << ','
+            << worldData->diagnosticTotalDR << '\n';
     }
     
     // add ARGnode to the vector of nodes

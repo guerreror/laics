@@ -214,7 +214,8 @@ static bool processGeneFluxBoundariesAtX(
     vector<GeneFluxEvent_SMC>& geneFluxLog,
     const Parameters::ParameterData& paramData,
     const vector<vector<double>>& mig_prob_cut,
-    const vector<pair<double, vector<vector<double>>>>& schedule,
+    const vector<pair<double, vector<vector<double>>>>& standard_mig_schedule,
+    const vector<pair<double, vector<vector<double>>>>& inverted_mig_schedule,
     double currentX,
     int hop,
     int timer,
@@ -274,7 +275,8 @@ static bool processGeneFluxBoundariesAtX(
                                               restartTime,
                                               paramData,
                                               mig_prob_cut,
-                                              schedule,
+                                              standard_mig_schedule,
+                                              inverted_mig_schedule,
                                               currentX,
                                               hop,
                                               &outcome,
@@ -879,7 +881,7 @@ int main(int argc, const char *argv[])
     for (int timer = 0; timer < (int)nRuns; ++timer)
     {
         resetMigrationState();
-        params.setPhi();
+        //params.setPhi();
         params.setSNPs();
         params.setCarriers();
 
@@ -962,7 +964,8 @@ int main(int argc, const char *argv[])
                                              geneFluxLog,
                                              *params.paramData,
                                              mig_prob_cut,
-                                             schedule,
+                                             horizontal_standard_schedule,
+                                             horizontal_inverted_schedule,
                                              currentX,
                                              hop,
                                              timer,
@@ -1162,15 +1165,15 @@ int main(int argc, const char *argv[])
             if (hopTrace.is_open()) {
                 hopTrace << std::setprecision(17);
                 hopTrace << timer << ","
-                         << hop << ","
-                         << currentX << ","
-                         << rawHopDelta << ","
-                         << finalHopDelta << ","
-                         << nextX << ","
-                         << rho << ","
-                         << Li_sum << ","
-                         << Ls_sum << ","
-                         << (activeTree ? activeTree->time : 0.0) << "\n";
+                    << hop << ","
+                    << currentX << ","
+                    << rawHopDelta << ","
+                    << finalHopDelta << ","
+                    << nextX << ","
+                    << rho << ","
+                    << Li_sum << ","
+                    << Ls_sum << ","
+                    << (activeTree ? activeTree->time : 0.0) << "\n";
             }
             if (hopEvents.is_open()) {
                 for (const auto& row : outcome.eventRows) {

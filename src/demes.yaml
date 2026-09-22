@@ -3,63 +3,83 @@
 
 # demes:
 #   # Ancestral deme
-#   - name: root
-#     epochs:
-#       - start_size: 10000
-#         end_time: 10000    
-
 #   - name: pop0
-#     start_time: 10000
-#     ancestors: [root]
 #     epochs:
-#       - start_size: 10000
-#         end_time: 0
-        
-        
-# description: two pops of size 10000 split from a single ancestor at 10000 generations; migration explicitly set to zero
+#       - start_size: 500
+#         end_time: 0    
 
 
-# -----------------------------------------------------------------
-description: two pops of size 10000 split from a single ancestor at 10000 generations; migration explicitly set to zero
+description: twp-population 
 time_units: generations
 
 demes:
+  # Ancestral deme
   - name: root
     epochs:
-      - start_size: 8888
-        end_time: 50000
+      - start_size: 5000
+        end_time: 12500    
 
   - name: pop0
     ancestors: [root]
     epochs:
-      - start_size: 87000
+      - start_size: 1000
         end_time: 0
-
-  - name: anc12
-    ancestors: [root]
-    epochs:
-      - start_size: 30000
-        end_time: 20000
 
   - name: pop1
-    ancestors: [anc12]
+    ancestors: [root]
     epochs:
-      - start_size: 6666
+      - start_size: 3000
         end_time: 0
-
-  - name: pop2
-    ancestors: [anc12]
-    epochs:
-      - start_size: 66668
-        end_time: 0
-
+        
 migrations:
   - demes: [pop0, pop1]
-    rate: 0.005
-  - demes: [pop0, pop2]
-    rate: 0.0025
-  - demes: [pop1, pop2]
-    rate: 0.003
+    rate: 0
+
+
+# description: two pops of size 10000 split from a single ancestor at 10000 generations; migration explicitly set to zero
+
+
+# # -----------------------------------------------------------------
+# description: two pops of size 10000 split from a single ancestor at 10000 generations; migration explicitly set to zero
+# time_units: generations
+
+# demes:
+#   - name: root
+#     epochs:
+#       - start_size: 8888
+#         end_time: 50000
+
+#   - name: pop0
+#     ancestors: [root]
+#     epochs:
+#       - start_size: 87000
+#         end_time: 0
+
+#   - name: anc12
+#     ancestors: [root]
+#     epochs:
+#       - start_size: 30000
+#         end_time: 20000
+
+#   - name: pop1
+#     ancestors: [anc12]
+#     epochs:
+#       - start_size: 6666
+#         end_time: 0
+
+#   - name: pop2
+#     ancestors: [anc12]
+#     epochs:
+#       - start_size: 66668
+#         end_time: 0
+
+# migrations:
+#   - demes: [pop0, pop1]
+#     rate: 0.005
+#   - demes: [pop0, pop2]
+#     rate: 0.0025
+#   - demes: [pop1, pop2]
+#     rate: 0.003
 
 # description: two pops of size 10000 split from a single ancestor at 10000 generations; migration explicitly set to zero
 # time_units: generations

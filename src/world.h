@@ -24,6 +24,7 @@
 		using std::vector;
 	#include <map>
 		using std::map;
+	#include <iosfwd>
 		
 // Includes from our files:
 	#include "typedefs.h"
@@ -67,6 +68,7 @@ public:
 	unsigned short  migrateEvent(vector < vector< double> >& mig_prob, vector<double>& rate, double total);
 	unsigned short  coalesceEvent(vector<double>& rate, double total);
 	unsigned short recombineEvent(vector<double>& rate, double total, RecombinationType type);
+	void setRecombinationDiagnostics(std::ostream* output, int replicate);
 	unsigned short  doubrecEvent(vector<double>& rate, double total);
 	unsigned short  simulateGeneration(vector< vector< double > >& mig_prob);
 	unsigned short  simulateGeneration_SMC(vector< vector< double > >& mig_prob);
@@ -116,6 +118,10 @@ struct World::WorldData		// Structure with the private data for World, accessed 
 	double gcRate; 
 	double drRate;
 	double basesPerMorgan;
+	std::ostream* recombinationDiagnostics;
+	int diagnosticReplicate;
+	double diagnosticTotalGC;
+	double diagnosticTotalDR;
 	Context originCtx;
 	vector<double> freq;
     double ancesterFreq;

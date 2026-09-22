@@ -1,15 +1,15 @@
 # ARG counterpart to the SMC control in parameters_smc.yaml.
 Seed: "0"
-NumberOfReplicates: "1000"
+NumberOfReplicates: "10000"
 
 KingmanCoal: "1"
 DriftSimulation: "0"
 MSOutput: "0"
 
 # One value per present-day population in demes.yaml.
-InversionFrequency: "0 0"
+InversionFrequency: "0.33 0.22"
 AncestorFrequencies:
-  root: 0
+  root: 0.0
 InversionAge: "10000"
 
 BasesPerMorgan: "1e8"
@@ -17,16 +17,21 @@ RandPhi: "0"
 Phi: "0"
 InversionRange: "0 100000"
 
-FixedSNPs: "1 1 1e-6"
+FixedSNPs: "1 6 1e-6"
 RandomSNPs: "0"
-SiteNodePositions: "0"
+SiteNodePositions: "0 1000 10000 20000 40000 90000"
 
 RandomSample: "0"
 Samples:
-  pop0: "1 0"  # one standard chromosome
-  pop1: "1 0"  # one standard chromosome
+  pop0: "2 0"  # one standard chromosome
+  pop1: "2 0"  # one standard chromosome
 
 SMC: "0"
+Verbose: "0"
+# GeneConversionRate: "0.00000001"
+DoubleRecombinationRate: "0"
+GeneConversionRate: "0"
+
 
 # Lowercase key is retained for compatibility with the existing launcher.
 outputRoot: "/share/guerrerolab/baturne5/laics_output/diag/"

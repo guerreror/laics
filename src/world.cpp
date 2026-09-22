@@ -91,6 +91,10 @@ World::World(shared_ptr<Parameters::ParameterData> p){
 	worldData->drRate=p->drRate;
 	worldData->gcRate=p->gcRate;
 	worldData->basesPerMorgan=p->BasesPerMorgan;
+	worldData->recombinationDiagnostics = nullptr;
+	worldData->diagnosticReplicate = -1;
+	worldData->diagnosticTotalGC = 0.0;
+	worldData->diagnosticTotalDR = 0.0;
 	worldData->freq=p->initialFreqs;
 
     worldData->freq.resize(nClust);
@@ -199,6 +203,11 @@ World::World(shared_ptr<Parameters::ParameterData> p){
 
 World::~World(){
 	DBG("Population:: Destructing...")
+}
+
+void World::setRecombinationDiagnostics(std::ostream* output, int replicate) {
+	worldData->recombinationDiagnostics = output;
+	worldData->diagnosticReplicate = replicate;
 }
 
 void World::recordContextFlip(shared_ptr<Chromosome> chrom){

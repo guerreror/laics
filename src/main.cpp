@@ -147,6 +147,15 @@ int main(int argc, const char *argv[])
         tmrca_by_site_out << "run,site_index,site_position_morgan,tmrca_scaled\n";
     }
 
+    ofstream recombination_out(
+        pathJoin(output_dir, "arg_recombination_events.csv").c_str());
+    if (recombination_out.is_open()) {
+        recombination_out
+            << "replicate,generation,event_type,carrier_arrangement,"
+            << "partner_arrangement,bp1_bp,bp2_bp,tract_length_bp,"
+            << "total_gc,total_dr\n";
+    }
+
 
     const std::string mig_json = "src/migration_matrices.json";
     auto schedule = readMigrationSchedule(mig_json);
@@ -203,6 +212,7 @@ int main(int argc, const char *argv[])
         unsigned nCarriers = params.paramData->initChr.size();
 
         World *world = new World(params.getpData());
+        world->setRecombinationDiagnostics(&recombination_out, timer);
         while (!world->simulationFinished())
         {
             // -----------------------------

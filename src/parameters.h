@@ -34,7 +34,7 @@
      std::vector<unsigned int> getSamplePerPop();
      std::vector<shared_ptr<Chromosome>> getChromVec();
      shared_ptr<ParameterData> getpData();
-     void setPhi();
+     //void setPhi();
      void setCarriers();
      void setSNPs();
      void setTimeStamp(double t);
@@ -52,7 +52,7 @@
      std::vector<double> phi_range;
      Segment invRange;
      Segment smcRange;
-     double phi;
+     //double phi;
      double theta;
      double BasesPerMorgan;
      bool kingman;
