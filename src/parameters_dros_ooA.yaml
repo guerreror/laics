@@ -24,8 +24,7 @@ SMC: "1"
 Verbose: "0"
 TargetSNPs: ""
 
-GeneConversionRate: "0.0000000488"
-DoubleRecombinationRate: "0.00004"
-
-# Lowercase key is retained for compatibility with the existing launcher.
-outputRoot: "/share/guerrerolab/baturne5/laics_output/diag/"
+# No gene flux in this SNM control.
+GeneConversionRate: "0.000004"
+DoubleRecombinationRate: "0.0002"
+TractSize: "200"

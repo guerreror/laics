@@ -6,57 +6,82 @@
 #include <functional>
 #include <algorithm>
 
-SMCActiveState activeStateAtTime_SMC(const Parameters::ParameterData& params, double t) {
-    struct Event { double time; int type; std::vector<double> data; };
-    std::vector<Event> events;
-    const size_t nPops = params.popSizeVec.size();
+const SMCActiveState& activeStateAtTime_SMC(const Parameters::ParameterData& params, double t) {
+    struct Event { double time; int type; size_t index; };
+    static const Parameters::ParameterData* cachedParams = nullptr;
+    static std::vector<double> times;
+    static std::vector<SMCActiveState> states;
 
-    if (!params.demography.empty() && params.demography[0] == 1) {
-        const size_t stride = 1 + nPops;
-        for (size_t i = 1; i + nPops < params.demography.size(); i += stride) {
-            std::vector<double> data(params.demography.begin() + i + 1,
-                                     params.demography.begin() + i + 1 + nPops);
-            events.push_back({params.demography[i], 2, data});
-        }
-    }
-    if (!params.speciation.empty() && params.speciation[0] == 1) {
-        for (size_t i = 1; i + 4 < params.speciation.size(); i += 5) {
-            events.push_back({params.speciation[i + 2], 1,
-                              {params.speciation[i], params.speciation[i + 1],
-                               params.speciation[i + 3], params.speciation[i + 4]}});
-        }
-    }
-    // Inversion age needs to be assessed, along with existing speciation and demography events
-    if (params.inv_age > 0) {
-    events.push_back({static_cast<double>(params.inv_age), 0, {}});
-    }
+    if (cachedParams != &params) {
+        cachedParams = &params;
+        times.clear();
+        states.clear();
 
-    std::sort(events.begin(), events.end(), [](const Event& a, const Event& b) {
-        if (a.time != b.time) return a.time < b.time;
-        return a.type > b.type; // demography before speciation at the same time.
-    });
+        std::vector<Event> events;
+        const size_t nPops = params.popSizeVec.size();
+        events.reserve(params.demography.size() + params.speciation.size() + 1);
 
-    SMCActiveState state{params.popSizeVec, params.initialFreqs};
-    for (const auto& ev : events) {
-        if (ev.time > t + 1e-9) break;
-        if (ev.type == 2) {
-            for (size_t k = 0; k < state.popSizes.size() && k < ev.data.size(); ++k)
-                if (ev.data[k] != 0) state.popSizes[k] = static_cast<unsigned int>(ev.data[k]);
-        } else if (ev.type == 1) {
-            const unsigned int A = static_cast<unsigned int>(ev.data[0]);
-            const unsigned int B = static_cast<unsigned int>(ev.data[1]);
-            if (A < state.popSizes.size() && B < state.popSizes.size()) {
-                state.popSizes[A] = static_cast<unsigned int>(ev.data[3]);
-                state.invFreqs[A] = ev.data[2];
-                state.popSizes.erase(state.popSizes.begin() + static_cast<long>(B));
-                state.invFreqs.erase(state.invFreqs.begin() + static_cast<long>(B));
+        if (!params.demography.empty() && params.demography[0] == 1) {
+            const size_t stride = 1 + nPops;
+            for (size_t i = 1; i + nPops < params.demography.size(); i += stride) {
+                events.push_back({params.demography[i], 2, i});
             }
-        // Inversion age boundary, set all samples to standard 
-        } else if (ev.type == 0) {
-            std::fill(state.invFreqs.begin(), state.invFreqs.end(), 0.0);
+        }
+        if (!params.speciation.empty() && params.speciation[0] == 1) {
+            for (size_t i = 1; i + 4 < params.speciation.size(); i += 5) {
+                events.push_back({params.speciation[i + 2], 1, i});
+            }
+        }
+        if (params.inv_age > 0) {
+            events.push_back({static_cast<double>(params.inv_age), 0, 0});
+        }
+
+        std::sort(events.begin(), events.end(), [](const Event& a, const Event& b) {
+            if (a.time != b.time) return a.time < b.time;
+            return a.type > b.type;
+        });
+
+        SMCActiveState state{params.popSizeVec, params.initialFreqs};
+        times.push_back(-1.0);
+        states.push_back(state);
+        for (const auto& ev : events) {
+            if (ev.type == 2) {
+                for (size_t k = 0;
+                     k < state.popSizes.size() &&
+                     ev.index + 1 + k < params.demography.size();
+                     ++k) {
+                    const double size = params.demography[ev.index + 1 + k];
+                    if (size != 0) {
+                        state.popSizes[k] = static_cast<unsigned int>(size);
+                    }
+                }
+            } else if (ev.type == 1) {
+                const unsigned int A =
+                    static_cast<unsigned int>(params.speciation[ev.index]);
+                const unsigned int B =
+                    static_cast<unsigned int>(params.speciation[ev.index + 1]);
+                if (A < state.popSizes.size() && B < state.popSizes.size()) {
+                    state.popSizes[A] =
+                        static_cast<unsigned int>(params.speciation[ev.index + 4]);
+                    state.invFreqs[A] = params.speciation[ev.index + 3];
+                    state.popSizes.erase(
+                        state.popSizes.begin() + static_cast<long>(B));
+                    state.invFreqs.erase(
+                        state.invFreqs.begin() + static_cast<long>(B));
+                }
+            } else if (ev.type == 0) {
+                std::fill(state.invFreqs.begin(), state.invFreqs.end(), 0.0);
+            }
+
+            times.push_back(ev.time);
+            states.push_back(state);
         }
     }
-    return state;
+
+    const double query = t + 1e-9;
+    const auto it = std::upper_bound(times.begin(), times.end(), query);
+    const size_t idx = (it == times.begin()) ? 0 : static_cast<size_t>((it - times.begin()) - 1);
+    return states[idx];
 }
 
 static bool segmentCarriesSite(double x, const std::vector<Segment>& segments) {

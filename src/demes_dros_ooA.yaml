@@ -1,4 +1,5 @@
 description: Two pop, three epoch (modern, bottleneck, ancestral) model estimated for two Drosophila Melanogaster populations, African (ancestral) and European (derived) from Li and Stephan (2006). 
+time_units: generations
 
 demes:
 

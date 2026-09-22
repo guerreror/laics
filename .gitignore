@@ -2,6 +2,9 @@
 pytest/
 .pytest_cache/
 .venv/
+__pycache__/
+build/
+smc_trees/
 labp_v17.xcodeproj/
 run.trace/
 run4.trace/
@@ -16,8 +19,33 @@ src/labp_v20.dSYM/
 src/labp_v21.dSYM/
 
 # Files to ignore
+.DS_Store
+*.pyc
+smc_hop_trace.csv
+smc_hop_events.csv
+samp.py
+samp_tree.png
+samp_tree.svg
 executables/labp_v199
 executables/labp_v21
 executables/labp_v20
 executables/labp_v19
 labp_smc.dSYM
+
+# Only vendor the minimal TSK C sources needed by the Makefile.
+third_party/tskit/*
+!third_party/tskit/LICENSE
+!third_party/tskit/c/
+third_party/tskit/c/*
+!third_party/tskit/c/tskit/
+third_party/tskit/c/tskit/*
+!third_party/tskit/c/tskit/core.c
+!third_party/tskit/c/tskit/core.h
+!third_party/tskit/c/tskit/tables.c
+!third_party/tskit/c/tskit/tables.h
+!third_party/tskit/c/subprojects/
+third_party/tskit/c/subprojects/*
+!third_party/tskit/c/subprojects/kastore/
+third_party/tskit/c/subprojects/kastore/*
+!third_party/tskit/c/subprojects/kastore/kastore.c
+!third_party/tskit/c/subprojects/kastore/kastore.h

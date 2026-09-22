@@ -9,9 +9,7 @@ import re
 import random
 from datetime import datetime
 import json
-import gzip
 import os
-import shutil
 from collections import defaultdict, deque
 
 # ---------- File paths ----------
@@ -60,8 +58,7 @@ parameters = {
     "target_snp":   "",
     "gc":           "1.0",
     "dr":           "1.0",
-    "csvSnapshots": "0",
-    "binarySnapshots": "1",
+    "tractSize":    "200",
     "hopInformation": "0",
     "outputRoot":   DEFAULT_OUTPUT_ROOT,
 }
@@ -87,8 +84,7 @@ YAML_KEY_ALIASES = {
     "TargetSNPs": "target_snp",
     "GeneConversionRate": "gc",
     "DoubleRecombinationRate": "dr",
-    "CSVSnapshots": "csvSnapshots",
-    "BinarySnapshots": "binarySnapshots",
+    "TractSize": "tractSize",
     "HopInformation": "hopInformation",
 }
 
@@ -117,8 +113,7 @@ DISPLAY_KEY_NAMES = {
     "target_snp": "TargetSNPs",
     "gc": "GeneConversionRate",
     "dr": "DoubleRecombinationRate",
-    "csvSnapshots": "CSVSnapshots",
-    "binarySnapshots": "BinarySnapshots",
+    "tractSize": "TractSize",
     "hopInformation": "HopInformation",
 }
 
@@ -742,6 +737,7 @@ if smc_flag == "1":
     args_list += [
         parameters["verbose"],
         parameters["target_snp"],
+        parameters["tractSize"],
         parameters["csvSnapshots"],
         parameters["binarySnapshots"],
         parameters["hopInformation"],

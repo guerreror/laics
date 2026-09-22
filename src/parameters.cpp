@@ -338,19 +338,14 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
         paramData->drRate = std::stod(param_vec[outputBase + 3]);
     }
 
-    paramData->csvSnapshots = false;
+    paramData->tractSize = 200.0;
     if (param_vec.size() > outputBase + 4) {
-        paramData->csvSnapshots = (param_vec[outputBase + 4] == "1");
-    }
-
-    paramData->binarySnapshots = true;
-    if (param_vec.size() > outputBase + 5) {
-        paramData->binarySnapshots = (param_vec[outputBase + 5] == "1");
+        paramData->tractSize = std::stod(param_vec[outputBase + 4]);
     }
 
     paramData->hopInformation = false;
-    if (param_vec.size() > outputBase + 6) {
-        paramData->hopInformation = (param_vec[outputBase + 6] == "1");
+    if (param_vec.size() > outputBase + 5) {
+        paramData->hopInformation = (param_vec[outputBase + 5] == "1");
     }
 
     std::cerr << "Verbose " << paramData->smcVerbose << '\n';
@@ -365,8 +360,7 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
     }
     std::cerr << "Gene Conversion Rate: " << paramData->gcRate << '\n';
     std::cerr << "Double Recombination Rate: " << paramData->drRate << '\n';
-    std::cerr << "CSV snapshots: " << paramData->csvSnapshots << '\n';
-    std::cerr << "Binary snapshots: " << paramData->binarySnapshots << '\n';
+    std::cerr << "Tract Size: " << paramData->tractSize << '\n';
     std::cerr << "Hop information: " << paramData->hopInformation << '\n';
 }
 

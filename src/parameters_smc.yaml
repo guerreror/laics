@@ -5,7 +5,6 @@ NumberOfReplicates: "10000"
 KingmanCoal: "1"
 DriftSimulation: "0"
 MSOutput: "0"
-
 # One value per present-day population in demes.yaml.
 InversionFrequency: "0.33 0.22"
 AncestorFrequencies:
@@ -27,6 +26,7 @@ Samples:
   pop1: "2 0"  # one standard chromosome
 
 SMC: "1"
+
 Verbose: "0"
 # GeneConversionRate: "0.00000001"
 DoubleRecombinationRate: "0"
