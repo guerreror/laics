@@ -703,10 +703,8 @@ static TreeShapeStats summarizeTreeShape(TreeNode* root)
     return stats;
 }
 
-static void writeTreeShapeHeader(const string& path)
+static void writeTreeShapeHeader(std::ostream& out)
 {
-    std::ofstream out(path.c_str());
-    if (!out.is_open()) return;
     out << "run,hop,current_x,rho,root_time,max_time,node_count,edge_count,"
         << "leaf_count,unary_node_count,branching_node_count,max_depth,"
         << "total_branch_length,unary_parent_branch_length,"
@@ -718,15 +716,13 @@ static void writeTreeShapeHeader(const string& path)
         << "standard_branch_length,inverted_branch_length\n";
 }
 
-static void appendTreeShapeRow(const string& path,
+static void appendTreeShapeRow(std::ostream& out,
                                int run,
                                int hop,
                                double currentX,
                                double rho,
                                const TreeShapeStats& stats)
 {
-    std::ofstream out(path.c_str(), std::ios::app);
-    if (!out.is_open()) return;
     out << run << ","
         << hop << ","
         << currentX << ","
@@ -812,6 +808,8 @@ int main(int argc, const char *argv[])
     const string coalescence_diagnostic_path =
         pathJoin(output_dir, "smc_coalescence_diagnostics.csv");
     bool treeShapeHeaderWritten = false;
+
+    std::ofstream treeShape(tree_shape_path.c_str());
 
     std::ofstream coalescenceDiagnostics;
     if (params.paramData->smcVerbose) {
@@ -1049,16 +1047,18 @@ int main(int argc, const char *argv[])
                 break;
             }
             std::unordered_map<unsigned long, TreeNode*> clonedNodes;
-            if (!treeShapeHeaderWritten) {
-                writeTreeShapeHeader(tree_shape_path);
+            if (treeShape.is_open() && !treeShapeHeaderWritten) {
+                writeTreeShapeHeader(treeShape);
                 treeShapeHeaderWritten = true;
             }
-            appendTreeShapeRow(tree_shape_path,
-                               timer,
-                               hop,
-                               currentX,
-                               rho,
-                               summarizeTreeShape(activeTree));
+            if (treeShape.is_open()) {
+                appendTreeShapeRow(treeShape,
+                                   timer,
+                                   hop,
+                                   currentX,
+                                   rho,
+                                   summarizeTreeShape(activeTree));
+            }
 
             TreeNode* workingTree = cloneTreeWithMap(activeTree, clonedNodes);
             unsigned long cutParentId = 0;
