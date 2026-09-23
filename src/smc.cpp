@@ -1297,7 +1297,7 @@ int main(int argc, const char *argv[])
     }
 
     end = std::chrono::system_clock::now();
-    treeSequences.write("smc_trees");
+    treeSequences.write(pathJoin(output_dir, "trees"));
     std::chrono::duration<double> elapsed_seconds = end - start;
     std::cerr << "Elapsed time: " << elapsed_seconds.count() << "s\n";
 
