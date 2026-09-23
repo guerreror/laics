@@ -147,8 +147,11 @@ int main(int argc, const char *argv[])
         tmrca_by_site_out << "run,site_index,site_position_morgan,tmrca_scaled\n";
     }
 
-    ofstream recombination_out(
-        pathJoin(output_dir, "arg_recombination_events.csv").c_str());
+    ofstream recombination_out;
+    if (params.paramData->smcVerbose) {
+        recombination_out.open(
+            pathJoin(output_dir, "arg_recombination_events.csv").c_str());
+    }
     if (recombination_out.is_open()) {
         recombination_out
             << "replicate,generation,event_type,carrier_arrangement,"
@@ -212,7 +215,9 @@ int main(int argc, const char *argv[])
         unsigned nCarriers = params.paramData->initChr.size();
 
         World *world = new World(params.getpData());
-        world->setRecombinationDiagnostics(&recombination_out, timer);
+        world->setRecombinationDiagnostics(
+            params.paramData->smcVerbose ? &recombination_out : nullptr,
+            timer);
         while (!world->simulationFinished())
         {
             // -----------------------------

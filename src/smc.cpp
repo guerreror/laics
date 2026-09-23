@@ -813,14 +813,15 @@ int main(int argc, const char *argv[])
         pathJoin(output_dir, "smc_coalescence_diagnostics.csv");
     bool treeShapeHeaderWritten = false;
 
-    {
-        std::ofstream coalescenceDiagnostics(coalescence_diagnostic_path);
-        if (coalescenceDiagnostics.is_open()) {
-            coalescenceDiagnostics
-                << "run,hop,current_x,phase,lineage_time,population,arrangement,"
-                << "population_size,arrangement_frequency,context_size,lineage_count,"
-                << "eligible_pair_count,pair_rate_used,total_c_used,total_m,total_g\n";
-        }
+    std::ofstream coalescenceDiagnostics;
+    if (params.paramData->smcVerbose) {
+        coalescenceDiagnostics.open(coalescence_diagnostic_path);
+    }
+    if (coalescenceDiagnostics.is_open()) {
+        coalescenceDiagnostics
+            << "run,hop,current_x,phase,lineage_time,population,arrangement,"
+            << "population_size,arrangement_frequency,context_size,lineage_count,"
+            << "eligible_pair_count,pair_rate_used,total_c_used,total_m,total_g\n";
     }
 
     std::cerr << "\n\n";
@@ -931,6 +932,7 @@ int main(int argc, const char *argv[])
         hopEvents << "run,hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
     }
     TskitCStore treeSequences;
+    treeSequences.enabled = params.paramData->smcVerbose;
 
     for (int timer = 0; timer < (int)nRuns; ++timer)
     {
@@ -1105,13 +1107,9 @@ int main(int argc, const char *argv[])
                                             hopEvents);
 
             // Append every vertical rate calc during this hop
-            if (!outcome.coalescenceRows.empty()) {
-                std::ofstream coalescenceDiagnostics(
-                    coalescence_diagnostic_path, std::ios::app);
-                if (coalescenceDiagnostics.is_open()) {
-                    for (const auto& row : outcome.coalescenceRows) {
-                        coalescenceDiagnostics << timer << "," << row;
-                    }
+            if (coalescenceDiagnostics.is_open()) {
+                for (const auto& row : outcome.coalescenceRows) {
+                    coalescenceDiagnostics << timer << "," << row;
                 }
             }
 

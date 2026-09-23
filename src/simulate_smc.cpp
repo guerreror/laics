@@ -135,7 +135,7 @@ static void recordCoalescenceRow_SMC(
     double totalCUsed,
     double totalM,
     double totalG) {
-    if (!outcome) return;
+    if (!outcome || !params.smcVerbose) return;
 
     // Compute the current effective population size and arrangement frequency for current context
     const SMCActiveState state = activeStateAtTime_SMC(params, lineageTime);
