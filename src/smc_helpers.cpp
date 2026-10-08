@@ -19,7 +19,7 @@ const SMCActiveState& activeStateAtTime_SMC(const Parameters::ParameterData& par
 
         std::vector<Event> events;
     const size_t nPops = params.popSizeVec.size();
-    events.reserve(params.demography.size() + params.speciation.size());
+    events.reserve(params.demography.size() + params.speciation.size() + 1);
 
     if (!params.demography.empty() && params.demography[0] == 1) {
         const size_t stride = 1 + nPops;
@@ -31,6 +31,9 @@ const SMCActiveState& activeStateAtTime_SMC(const Parameters::ParameterData& par
         for (size_t i = 1; i + 4 < params.speciation.size(); i += 5) {
             events.push_back({params.speciation[i + 2], 1, i});
         }
+    }
+    if (params.inv_age > 0) {
+        events.push_back({static_cast<double>(params.inv_age), 0, 0});
     }
 
     std::sort(events.begin(), events.end(), [](const Event& a, const Event& b) {
@@ -47,7 +50,7 @@ const SMCActiveState& activeStateAtTime_SMC(const Parameters::ParameterData& par
                 const double size = params.demography[ev.index + 1 + k];
                 if (size != 0) state.popSizes[k] = static_cast<unsigned int>(size);
             }
-        } else {
+        } else if (ev.type == 1) {
             const unsigned int A = static_cast<unsigned int>(params.speciation[ev.index]);
             const unsigned int B = static_cast<unsigned int>(params.speciation[ev.index + 1]);
             if (A < state.popSizes.size() && B < state.popSizes.size()) {
@@ -56,6 +59,8 @@ const SMCActiveState& activeStateAtTime_SMC(const Parameters::ParameterData& par
                 state.popSizes.erase(state.popSizes.begin() + static_cast<long>(B));
                 state.invFreqs.erase(state.invFreqs.begin() + static_cast<long>(B));
             }
+        } else {
+            std::fill(state.invFreqs.begin(), state.invFreqs.end(), 0.0);
         }
             times.push_back(ev.time);
             states.push_back(state);

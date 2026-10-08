@@ -101,10 +101,23 @@ static bool nextMigrationMatrixTimeAfter_SMC(
 
 static double computeTotalC_SMC(const Parameters::ParameterData& params,
                                 double t,
-                                unsigned int pop) {
+                                const Context& context) {
     const SMCActiveState& state = activeStateAtTime_SMC(params, t);
-    if (pop >= state.popSizes.size() || state.popSizes[pop] == 0) return 0.0;
-    return 1.0 / static_cast<double>(state.popSizes[pop]);
+
+    if (context.pop >= state.popSizes.size() ||
+        context.pop >= state.invFreqs.size()) {
+        std::cerr << "Warning in computeTotalC_SMC(): population index "
+                  << context.pop << " is invalid at time " << t << "\n";
+        return 0.0;
+    }
+
+    const double arrangementFrequency = context.inversion == 1
+        ? state.invFreqs[context.pop]
+        : 1.0 - state.invFreqs[context.pop];
+    const double contextSize =
+        static_cast<double>(state.popSizes[context.pop]) * arrangementFrequency;
+    if (contextSize <= 0.0) return 0.0;
+    return 1.0 / contextSize;
 }
 
 static double computeTotalCForLineages_SMC(const std::vector<TreeNode*>& lineages,
@@ -114,7 +127,7 @@ static double computeTotalCForLineages_SMC(const std::vector<TreeNode*>& lineage
     for (size_t i = 0; i < lineages.size(); ++i) {
         for (size_t j = i + 1; j < lineages.size(); ++j) {
             if (!canCoalesceByContext_SMC(lineages[i], lineages[j])) continue;
-            totalC += computeTotalC_SMC(params, t, lineages[i]->context.pop);
+            totalC += computeTotalC_SMC(params, t, lineages[i]->context);
         }
     }
     return totalC;
@@ -353,7 +366,8 @@ static void collectReattachCandidates_SMC(TreeNode* node,
                                           std::vector<ReattachCandidate_SMC>& out) {
     if (!node) return;
     for (auto* ch : node->children) {
-        if (node->time >= t && ch->time <= t &&
+        // A branch spans [child time, parent time), so the upper bound is exclusive.
+        if (node->time > t && ch->time <= t &&
             contextAfterEpochEvents_SMC(ch->context, params, t) == branchCtx) {
             out.push_back({node, ch});
         }
@@ -705,9 +719,16 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
 
         SMCEpochs_SMC epochs = buildEpochBreaks_SMC(mainRoot, lineageTime);
 
+        // Each compatible retained-tree branch contributes one pairwise rate.
+        std::vector<ReattachCandidate_SMC> eligibleTargets;
+        collectReattachCandidates_SMC(mainRoot, lineageTime, cutRoot->context,
+                                      params, eligibleTargets);
+
         const auto& activeMig = migrationMatrixAtTime_SMC(mig_schedule, mig_prob, lineageTime);
         double totalM = computeTotalM_SMC(cutRoot, params, activeMig);
-        double totalC = computeTotalC_SMC(params, lineageTime, cutRoot->context.pop);
+        double pairRate = computeTotalC_SMC(params, lineageTime, cutRoot->context);
+        double totalC = static_cast<double>(eligibleTargets.size()) * pairRate;
+
         double totalG = computeTotalG_SMC(cutRoot, params, lineageTime, currentHopX);
         double Rate = totalM + totalC + totalG;
         if (Rate <= 0.0) {
