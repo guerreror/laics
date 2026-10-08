@@ -157,6 +157,9 @@ unsigned short World::recombine_all(){
     //  Modified into recombine_all() by RG (III-16), does gene flux, heterokaryotypic, and homokaryotipic events.
     
 	int events=0;
+	const double inversionLengthBp =
+		(worldData->invRange.R - worldData->invRange.L) *
+		worldData->basesPerMorgan;
 	
 	vector< shared_ptr < Chromosome> > recombinants;
 	
@@ -169,27 +172,34 @@ unsigned short World::recombine_all(){
             double  freqI = getFreqI(i->first.pop);
             if (i->first.inversion==0) freqI= 1- freqI;
 
-			double gfRate = (1-freqI)* worldData->phi;
+			const double oppositeFrequency = 1.0 - freqI;
+			double drRate = oppositeFrequency * worldData->drRate;
+			double gcRate =
+				oppositeFrequency * worldData->gcRate * inversionLengthBp;
             double hetRate = (1- freqI)* chrom->getHeteroLength(worldData->invRange);
             double homRate = freqI * chrom->getHomoLength(worldData->invRange);
 	
             double x = randreal(0, 1);
 			
-			if (x < (gfRate + hetRate + homRate)){
+			if (x < (drRate + gcRate + hetRate + homRate)){
 				events++;
 				
-                bool gflux= false;
-                bool hetero = false;
-                
-                if(x < gfRate) {
-                    gflux = true;
+                RecombinationType type;
+                if (x < gcRate) {
+                    type = RecombinationType::GeneConversion;
                 }
-                else if(x < gfRate+hetRate){
-                    hetero=true;
+                else if (x < gcRate + drRate) {
+                    type = RecombinationType::DoubleRecombination;
+                }
+                else if (x < gcRate + drRate + hetRate) {
+                    type = RecombinationType::Heterokaryotypic;
+                }
+                else {
+                    type = RecombinationType::Homokaryotypic;
                 }
                 
 				// creat new chromosome
-				shared_ptr<Chromosome> chrom2 = recomb_Wrap(chrom, hetero, gflux);
+				shared_ptr<Chromosome> chrom2 = recomb_Wrap(chrom, type);
 				
 				CDBG("After recomb, chr has "<<chrom->get_All_SegVec().size()<<" segs, and chr2 "<< chrom2->get_All_SegVec().size())
 				

@@ -149,22 +149,10 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
     paramData->BasesPerMorgan = std::stod(param_vec[10]);
     std::cerr << "Bases per Morgan in homokaryotypic recombination " << paramData->BasesPerMorgan << '\n';
 
-    // Random phi flag (param_vec[11])
-    paramData->randPhi = (param_vec[11] == "1");
-    std::cerr << "Random phi values? " << paramData->randPhi << '\n';
-
-    // Phi range (param_vec[12])
-    iss.clear();
-    iss.str(param_vec[12]);
-    paramData->phi_range = vector<double>(std::istream_iterator<double>(iss), std::istream_iterator<double>());
-    if (paramData->randPhi)
-    {
-        std::cerr << " ARG gene flux (phi) range = " << paramData->phi_range[0] << " - " << paramData->phi_range[1] << '\n';
-    }
-    else
-    {
-        std::cerr << " ARG gene flux (phi) = " << paramData->phi_range[0] << '\n';
-    }
+    // param_vec[11] and param_vec[12] retain the legacy phi slots so older
+    // command lines keep their positional layout. ARG gene flux now uses the
+    // separate GeneConversionRate and DoubleRecombinationRate parameters.
+    std::cerr << "Legacy phi arguments ignored; using separate GC and DR rates.\n";
 
     // Inversion range (param_vec[13])
     vector<double> invtemp;
@@ -328,12 +316,12 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
             paramData->targetSNPs.end());
     }
 
-    paramData->gcRate = 1.0;
+    paramData->gcRate = 0.0;
     if (param_vec.size() > outputBase + 2) {
         paramData->gcRate = std::stod(param_vec[outputBase + 2]);
     }
 
-    paramData->drRate = 1.0;
+    paramData->drRate = 0.0;
     if (param_vec.size() > outputBase + 3) {
         paramData->drRate = std::stod(param_vec[outputBase + 3]);
     }
@@ -418,19 +406,6 @@ void Parameters::setCarriers()
                 paramData->initChr.push_back(chr);
             }
         }
-    }
-}
-
-void Parameters::setPhi()
-{
-    if (paramData->randPhi)
-    {
-        double phiExponent = randreal(paramData->phi_range[0], paramData->phi_range[1]);
-        paramData->phi = pow(10, phiExponent);
-    }
-    else
-    {
-        paramData->phi = paramData->phi_range[0];
     }
 }
 

@@ -161,7 +161,6 @@ int main(int argc, const char *argv[])
             std::cerr << "+";
 
         resetMigrationSchedule();
-        params.setPhi();
         params.setSNPs();
         params.setCarriers();
         unsigned nCarriers = params.paramData->initChr.size();

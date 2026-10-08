@@ -768,7 +768,6 @@ int main(int argc, const char *argv[])
     for (int timer = 0; timer < (int)nRuns; ++timer)
     {
         resetMigrationState();
-        params.setPhi();
         params.setSNPs();
         params.setCarriers();
 

@@ -53,8 +53,8 @@ parameters = {
     "smc":          "0",
     "verbose":      "1",
     "target_snp":   "",
-    "gc":           "1.0",
-    "dr":           "1.0",
+    "gc":           "0.0",
+    "dr":           "0.0",
     "tractSize":    "200",
     "hopInformation": "0",
 }
@@ -721,13 +721,17 @@ args_list = (
     [parameters["randomSample"]] +
     per_pop_strings
 )
+
+args_list += [
+    parameters["verbose"],
+    parameters["target_snp"],
+    parameters["gc"],
+    parameters["dr"],
+    parameters["tractSize"],
+]
+
 if smc_flag == "1":
     args_list += [
-        parameters["verbose"],
-        parameters["target_snp"],
-        parameters["gc"],
-        parameters["dr"],
-        parameters["tractSize"],
         parameters["hopInformation"],
     ]
 
