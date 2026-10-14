@@ -65,7 +65,7 @@ public:
 	unsigned short  simulateGeneration_SMC(vector< vector< double > >& mig_prob);
 	bool timeCheck_SMC(double waiting, double Rate);
 	void updateToNextEpoch_SMC();
-	unsigned short  migrateEvent_SMC(vector < vector< double> >& mig_prob, vector<double>& rate, double total);
+	unsigned short  migrateEvent_SMC(vector<double>& rate, double total);
 	unsigned short  coalesceEvent_SMC(vector<double>& rate, double total);
 	unsigned short migratePoisson(vector < vector< double> >& mig_prob);
 	unsigned short  coalescePoisson();

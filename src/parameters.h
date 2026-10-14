@@ -67,8 +67,6 @@
      std::vector<std::vector<int>> nCarriers;
      std::vector<shared_ptr<Chromosome>> initChr;
      std::vector<double> neut_site;
-     bool smcVerbose;
-     std::vector<double> targetSNPs;
      double gcRate;
      double drRate;
      double tractSize;

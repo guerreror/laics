@@ -36,14 +36,18 @@
  #include <string>
  #include <memory>
  
- using std::vector;
+using std::vector;
 using std::string;
 using std::shared_ptr;
+
+struct TreeNode;
 
 struct EdgeWeight {
 	unsigned long parent;
 	unsigned long child;
 	double weight;
+	TreeNode* parentNode = nullptr;
+	TreeNode* childNode = nullptr;
 };
 
 struct snpHit;

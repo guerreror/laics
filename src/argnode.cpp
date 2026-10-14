@@ -344,6 +344,52 @@ void ARGNode::writeDOT(const string &filename) const
 	outFile.close();
 }
 
+void ARGNode::writeTskitTables(const string &nodesFilename, const string &edgesFilename) const
+{
+	unordered_set<const ARGNode*> seen;
+	vector<const ARGNode*> nodes;
+	gatherAllNodes(seen, nodes);
+
+	std::ofstream nodesFile(nodesFilename.c_str());
+	std::ofstream edgesFile(edgesFilename.c_str());
+	if (!nodesFile.is_open() || !edgesFile.is_open()) {
+		std::cerr << "Error: Could not open ARG tskit table output files.\n";
+		return;
+	}
+
+	nodesFile << "id\ttime\tpop\tinv\tis_sample\n";
+	for (const auto *node : nodes) {
+		if (!node || node->getTime() < 0) continue;
+		const Context ctx = node->getContext();
+		nodesFile << node->getNodeNumber() << "\t"
+		          << node->getTime() << "\t"
+		          << ctx.pop << "\t"
+		          << ctx.inversion << "\t"
+		          << (node->getTime() == 0 ? 1 : 0) << "\n";
+	}
+
+	edgesFile << "parent\tchild\tleft\tright\n";
+	for (const auto *node : nodes) {
+		if (!node || node->getTime() < 0) continue;
+		const unsigned long nDesc = node->getNDescendants();
+		for (unsigned long i = 0; i < nDesc; ++i) {
+			shared_ptr<ARGNode> child = node->getDescendantNode(i);
+			if (!child || child->getTime() < 0) continue;
+			const vector<Segment> segs = node->getDescendantSegmentVector(i);
+			if (segs.empty()) {
+				edgesFile << node->getNodeNumber() << "\t"
+				          << child->getNodeNumber() << "\t0\t0\n";
+				continue;
+			}
+			for (const Segment &seg : segs) {
+				edgesFile << node->getNodeNumber() << "\t"
+				          << child->getNodeNumber() << "\t"
+				          << seg.L << "\t" << seg.R << "\n";
+			}
+		}
+	}
+}
+
 Branch::Branch(shared_ptr<ARGNode> n, vector<Segment> segVec){
 	node= n;
 	segmentVec= segVec;

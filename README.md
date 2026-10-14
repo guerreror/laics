@@ -12,12 +12,10 @@ InvLaBP simulates coalescent histories for sequences within a polymorphic chromo
     brew install boost yaml-cpp python
     python -m pip install demes numpy pyyaml
 
-    # 2) Edit demes.yaml
+    # 2) Add matching demes and parameter YAML files
+    #    - SMC_input/ for SMC
+    #    - ARG_input/ for ARG
     #    param.py automatically writes src/migration_matrices.json from demes.yaml
-
-    # 3) Edit simulation parameters
-    #    - src/parameters_smc.yaml for SMC
-    #    - src/parameters_arg.yaml for ARG
 
     # 4) Build (from src/)
     g++ -std=c++14 -O3 \
@@ -32,17 +30,17 @@ InvLaBP simulates coalescent histories for sequences within a polymorphic chromo
     # 5) Place the executable inside the executables folder
 
     # 6) Run (from repo root)
-    make run      # SMC
+    make run-smc  # SMC
     make run-arg  # ARG
 
 ---
 
 ## Newly Added Features
 
-- YAML-driven configuration (`src/parameters_smc.yaml`, `src/parameters_arg.yaml`)
+- Separate YAML input directories (`SMC_input/`, `ARG_input/`)
 - Demes-aware, time-varying migration via `demes.yaml` → `migration_matrices.json`
 - Multiple speciation merges and demography changes on explicit schedules
-- Python launcher (`src/param.py`) that parses configs, prints summaries, and can emit ms-style data
+- Python launcher (`src/param.py`) that parses configs and prints summaries
 
 ---
 
@@ -78,30 +76,26 @@ InvLaBP simulates coalescent histories for sequences within a polymorphic chromo
 
 Run (standard workflow):
 
-1. **Edit `demes.yaml`**  
-   Define populations, sizes, epochs, and migrations.
+1. **Add YAML inputs**
+   Put matching `demes_*.yaml` and `parameters_*.yaml` pairs in `SMC_input/`. ARG uses `ARG_input/demes_arg.yaml` and `ARG_input/parameters_arg.yaml`.
 
 2. **Let `param.py` generate migration matrices**
 
-   `param.py` automatically reads `demes.yaml` and writes `src/migration_matrices.json`.
+   `param.py` reads the selected demes file and writes `src/migration_matrices.json`.
 
-3. **Edit the parameter YAML accordingly**  
-   Use `src/parameters_smc.yaml` for SMC or `src/parameters_arg.yaml` for ARG.
+3. **Run from the root folder**
 
-4. **Run the Python launcher from the root folder**
-
-       python src/param.py --config src/parameters_smc.yaml
+       make run-smc
 
    Or use:
 
-       make run
        make run-arg
 
 ---
 
 ## Configuration
 
-SMC knobs live in `src/parameters_smc.yaml`; ARG knobs live in `src/parameters_arg.yaml`.
+SMC configurations live in `SMC_input/`; ARG configuration lives in `ARG_input/`.
 
 - `Seed`: RNG seed (`0` = random; the effective seed is printed)
 - `NumberOfReplicates`: number of simulation replicates
@@ -112,9 +106,6 @@ SMC knobs live in `src/parameters_smc.yaml`; ARG knobs live in `src/parameters_a
 
 - `DriftSimulation`:
   - (Drift simulation mode; see code / `param.py` for details)
-
-- `MSOutput`:  
-  `1` to emit `outLABP*.sites` and `outLABP*.stats`
 
 - `InversionFrequency`:  
   Initial inversion frequency per population
@@ -160,9 +151,6 @@ SMC knobs live in `src/parameters_smc.yaml`; ARG knobs live in `src/parameters_a
     pop0: "2 0"
     pop1: "2 0"
   ```
-
-- `TargetSNPs`:
-  SMC only. Emit diagnostics for selected horizontal positions.
 
 - `GeneConversionRate`:
   SMC local GC rectangle height.

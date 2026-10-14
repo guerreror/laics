@@ -1,0 +1,25 @@
+Seed: "1"
+NumberOfReplicates: "10"
+KingmanCoal: "1"
+DriftSimulation: "0"
+InversionAge: "1300000"
+BasesPerMorgan: "1e8"
+InversionRange: "0 8000000"
+RandomSample: "0"
+Demes:
+  pop0:
+    inversion_frequency: 0.1
+    samples:
+      standard: 10
+      inverted: 10
+  pop1:
+    inversion_frequency: 0.3
+    samples:
+      standard: 10
+      inverted: 10
+  root:
+    inversion_frequency: 0.6
+HopInformation: "0"
+GeneConversionRate: "0.0000000488"
+DoubleRecombinationRate: "0.00002"
+TractSize: "200"
