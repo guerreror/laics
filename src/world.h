@@ -49,7 +49,8 @@ public:
 	enum class RecombinationType {
 		Homokaryotypic,
 		Heterokaryotypic,
-		GeneConversion,
+		HomokaryotypicGeneConversion,
+		HeterokaryotypicGeneConversion,
 		DoubleRecombination
 	};
 

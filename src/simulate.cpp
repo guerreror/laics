@@ -58,14 +58,16 @@ unsigned short World::simulateGeneration(vector < vector <double> > & mig_prob){
     vector<double> rRate;
     vector<double> hRate;
     vector<double> drRates;
-    vector<double> gcRates;
+    vector<double> homoGcRates;
+    vector<double> heteroGcRates;
     
     double totalM=0;
     double totalC=0;
     double totalR=0;
     double totalH=0;
     double totalDR=0;
-    double totalGC=0;
+    double totalHomoGC=0;
+    double totalHeteroGC=0;
     const double inversionLengthBp =
         (worldData->invRange.R - worldData->invRange.L) *
         worldData->basesPerMorgan;
@@ -131,17 +133,22 @@ unsigned short World::simulateGeneration(vector < vector <double> > & mig_prob){
             
             for(int carrierID = 0; carrierID < k; ++carrierID){
                 const double oppositeFrequency = 1.0 - freqI;
-                const double carrierGcRate =
+                const double carrierHomoGcRate =
+                    freqI * worldData->gcRate * inversionLengthBp;
+                const double carrierHeteroGcRate =
                     oppositeFrequency * worldData->gcRate * inversionLengthBp;
                 const double carrierDrRate =
                     oppositeFrequency * worldData->drRate;
 
-                gcRates.push_back(carrierGcRate);
+                homoGcRates.push_back(carrierHomoGcRate);
+                heteroGcRates.push_back(carrierHeteroGcRate);
                 drRates.push_back(carrierDrRate);
 
-                totalGC += carrierGcRate;
+                totalHomoGC += carrierHomoGcRate;
+                totalHeteroGC += carrierHeteroGcRate;
                 totalDR += carrierDrRate;
-                CDBG("				gc = " <<carrierGcRate)
+                CDBG("				homo gc = " <<carrierHomoGcRate)
+                CDBG("				hetero gc = " <<carrierHeteroGcRate)
                 CDBG("				dr = " <<carrierDrRate)
                 
             }
@@ -153,7 +160,8 @@ unsigned short World::simulateGeneration(vector < vector <double> > & mig_prob){
     ///////////////////
     
     int nEvents=0;
-    double Rate= totalM+ totalC+ totalR+ totalH + totalDR + totalGC;
+    double Rate = totalM + totalC + totalR + totalH + totalDR
+        + totalHomoGC + totalHeteroGC;
     double waiting_t= randexp(Rate);
     
     CDBG("total Rate ="<<Rate)
@@ -170,8 +178,16 @@ unsigned short World::simulateGeneration(vector < vector <double> > & mig_prob){
             else if (event < (totalM+totalC)/Rate) nEvents+=coalesceEvent(cRate, totalC);
             else if (event < (totalM+totalC+totalR)/Rate)			nEvents+= recombineEvent(rRate, totalR, RecombinationType::Homokaryotypic);
             else if (event < (totalM+totalC+totalR+totalH)/Rate)	nEvents+= recombineEvent(hRate, totalH, RecombinationType::Heterokaryotypic);
-            else if (event < (totalM+totalC+totalR+totalH+totalGC)/Rate)
-                nEvents += recombineEvent(gcRates, totalGC, RecombinationType::GeneConversion);
+            else if (event < (totalM+totalC+totalR+totalH+totalHomoGC)/Rate)
+                nEvents += recombineEvent(
+                    homoGcRates,
+                    totalHomoGC,
+                    RecombinationType::HomokaryotypicGeneConversion);
+            else if (event < (totalM+totalC+totalR+totalH+totalHomoGC+totalHeteroGC)/Rate)
+                nEvents += recombineEvent(
+                    heteroGcRates,
+                    totalHeteroGC,
+                    RecombinationType::HeterokaryotypicGeneConversion);
             else
                 nEvents += recombineEvent(drRates, totalDR, RecombinationType::DoubleRecombination);
         }
@@ -642,9 +658,16 @@ shared_ptr<Chromosome> World::recomb_Wrap(shared_ptr<Chromosome> chrom, Recombin
 
     // Make two recombinant chromosomes	
     shared_ptr<Chromosome> chrom2;
-    const bool hetero = type != RecombinationType::Homokaryotypic;
-    int h= static_cast<int> (hetero); if (chrom->getInv()==h) {h=0;} else {h=1;}
-    Context other_ctx (chrom->getPopulation(), h);				
+    // changed from "type != homokaryotypic recomb" because homoGC is not the opposite arrangement, so we have to list them all now
+    const bool hetero =
+        type == RecombinationType::Heterokaryotypic ||
+        type == RecombinationType::HeterokaryotypicGeneConversion ||
+        type == RecombinationType::DoubleRecombination;
+    // use the opposite arrangement for a heterokaryotypic event; otherwise use the same arrangement
+    const int partnerInversion = hetero
+        ? 1 - chrom->getInv()
+        : chrom->getInv();
+    Context other_ctx(chrom->getPopulation(), partnerInversion);
     const int inv2_before = other_ctx.inversion;
     
     if(type == RecombinationType::DoubleRecombination){
@@ -665,7 +688,8 @@ shared_ptr<Chromosome> World::recomb_Wrap(shared_ptr<Chromosome> chrom, Recombin
          cout<<"StdSegs2 ";for(int i=0;i<chrom2->get_Std_Segs().size();++i)cout<<chrom2->get_Std_Segs().at(i).L<<" ";cout<<'\n';
          */
     }
-    else if(type == RecombinationType::GeneConversion){
+    else if(type == RecombinationType::HomokaryotypicGeneConversion ||
+            type == RecombinationType::HeterokaryotypicGeneConversion){
         const double bp1 = randreal(worldData->invRange.L, worldData->invRange.R);
         const double gcTractLength = worldData->tractSize / worldData->basesPerMorgan;
         const double bp2 = std::min(bp1 + gcTractLength, worldData->invRange.R);

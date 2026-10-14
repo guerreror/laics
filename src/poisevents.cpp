@@ -174,24 +174,29 @@ unsigned short World::recombine_all(){
 
 			const double oppositeFrequency = 1.0 - freqI;
 			double drRate = oppositeFrequency * worldData->drRate;
-			double gcRate =
+			double homoGcRate =
+				freqI * worldData->gcRate * inversionLengthBp;
+			double heteroGcRate =
 				oppositeFrequency * worldData->gcRate * inversionLengthBp;
             double hetRate = (1- freqI)* chrom->getHeteroLength(worldData->invRange);
             double homRate = freqI * chrom->getHomoLength(worldData->invRange);
 	
             double x = randreal(0, 1);
 			
-			if (x < (drRate + gcRate + hetRate + homRate)){
+			if (x < (drRate + homoGcRate + heteroGcRate + hetRate + homRate)){
 				events++;
 				
                 RecombinationType type;
-                if (x < gcRate) {
-                    type = RecombinationType::GeneConversion;
+                if (x < homoGcRate) {
+                    type = RecombinationType::HomokaryotypicGeneConversion;
                 }
-                else if (x < gcRate + drRate) {
+                else if (x < homoGcRate + heteroGcRate) {
+                    type = RecombinationType::HeterokaryotypicGeneConversion;
+                }
+                else if (x < homoGcRate + heteroGcRate + drRate) {
                     type = RecombinationType::DoubleRecombination;
                 }
-                else if (x < gcRate + drRate + hetRate) {
+                else if (x < homoGcRate + heteroGcRate + drRate + hetRate) {
                     type = RecombinationType::Heterokaryotypic;
                 }
                 else {
