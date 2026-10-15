@@ -5,13 +5,10 @@ import demes
 import subprocess
 import argparse
 import re
-import random
 import json
-import os
 from collections import defaultdict, deque
 
 # ---------- File paths ----------
-DEMES_YAML      = "src/demes.yaml"
 MIGRATION_JSON  = "src/migration_matrices.json"
 ADJUSTED_STANDARD_MIGRATION_JSON = "src/adjusted_standard_migration_matrices.json"
 ADJUSTED_INVERTED_MIGRATION_JSON = "src/adjusted_inverted_migration_matrices.json"
@@ -23,10 +20,23 @@ cli = argparse.ArgumentParser(description="Run laBP ARG or SMC from a YAML confi
 cli.add_argument(
     "--config",
     required=True,
-    help="Parameter YAML to load, e.g. src/parameters_smc.yaml or src/parameters_arg.yaml.",
+    help="Parameter YAML to load from SMC_input or ARG_input.",
+)
+cli.add_argument(
+    "--mode",
+    required=True,
+    choices=("smc", "arg"),
+    help="Simulation mode; selects the executable and argument layout.",
+)
+cli.add_argument(
+    "--demes",
+    required=True,
+    help="Demes YAML to load from SMC_input or ARG_input.",
 )
 cli_args = cli.parse_args()
 PARAMETERS_YAML = cli_args.config
+DEMES_YAML = cli_args.demes
+smc_flag = "1" if cli_args.mode == "smc" else "0"
 
 # ---------- Defaults ----------
 parameters = {
@@ -34,7 +44,7 @@ parameters = {
     "nruns":        "1",
     "kingman_coal": "1",
     "drift_sim":    "0",
-    "msOutput":     "1",
+    "msOutput":     "0",
     "popSizeVec":   "1000 1000",
     "inv_freq":     "0.2 ",
     "speciation":   "0 0 0",
@@ -133,7 +143,6 @@ def pop_index_order(leaves):
     return {name: i for i, name in enumerate(names)}
 
 def build_children_map(graph):
-    from collections import defaultdict
     children = defaultdict(list)
     for d in graph.demes:
         if getattr(d, "ancestors", None):
@@ -149,7 +158,6 @@ def build_children_map(graph):
 
 def leaves_under(node, children, leafset):
     out = []
-    from collections import deque
     q = deque([node])
     while q:
         u = q.popleft()
@@ -413,8 +421,6 @@ def build_speciation_from_demes(graph, ancestor_freqs=None, default_F=0.2):
     internal_nodes.sort(key=lambda n: min((by_name[c].start_time for c in children[n])), reverse=False)
 
     events = []
-    plan_log = []
-    groups_log = []
 
     def get_parent_F(parent):
         if ancestor_freqs is None:
@@ -443,18 +449,14 @@ def build_speciation_from_demes(graph, ancestor_freqs=None, default_F=0.2):
         F_parent = get_parent_F(parent)
 
         child_sets.sort(key=lambda x: find_group_idx(x[1][0]))
-        sink_child, sink_under = child_sets[0]
+        sink_under = child_sets[0][1]
 
-        for ch, under in child_sets[1:]:
+        for _, under in child_sets[1:]:
             A = find_group_idx(sink_under[0])
             B = find_group_idx(under[0])
             events.append((A, B, T, F_parent, R))
-            plan_log.append(
-                f"t={fmt_time(T)}: merge group {B} ({ch}:{under}) → group {A} ({sink_child}); F={F_parent:g}, R={R}"
-            )
             active_groups[A].extend(active_groups[B])
             del active_groups[B]
-            groups_log.append([list(g) for g in active_groups])
 
     pop_sizes_str = " ".join(sizes)
     if events:
@@ -467,16 +469,12 @@ def build_speciation_from_demes(graph, ancestor_freqs=None, default_F=0.2):
 
     debug_info = {
         "leaf_order": leaf_names_in_order,
-        "initial_groups": [[x] for x in leaf_names_in_order],
         "events": events,
-        "plan_log": plan_log,
-        "groups_log": groups_log,
     }
     return pop_sizes_str, speciation_str, debug_info
 
 # ---------- Demography (built from all demes) ----------
 def build_demography_from_demes_full(graph, leaf_order, spec_events):
-    by_name = {d.name: d for d in graph.demes}
     npops   = len(leaf_order)
 
     children = build_children_map(graph)
@@ -492,7 +490,7 @@ def build_demography_from_demes_full(graph, leaf_order, spec_events):
                 demog_records[ep.end_time].append((d.name, int(ep.start_size)))
 
     if not demog_records:
-        return "0 0 0", []
+        return "0 0 0"
 
     merges_at_time = defaultdict(list)
     for (A, B, T, _, _) in spec_events:
@@ -508,34 +506,28 @@ def build_demography_from_demes_full(graph, leaf_order, spec_events):
         return None
 
     demog_entries = ["1"]
-    dbg_lines = []
 
     for t in sorted(demog_records.keys()):
         sizes = [0] * npops
-        applied = []
 
         for name, sz in demog_records[t]:
             gi = group_index_for_deme(name)
             if gi is not None and gi < len(active_groups):
                 sizes[gi] = sz
-                applied.append((gi, name, sz))
 
         if any(v != 0 for v in sizes[:len(active_groups)]):
             demog_entries.append(f"{t:g}")
             demog_entries += [str(v) for v in sizes]
-            applied_str = ", ".join([f"g{gi}({name})={sz}" for gi, name, sz in applied])
-            dbg_lines.append(f"  t={fmt_time(t)}: {applied_str}")
 
         for (A, B) in sorted(merges_at_time.get(t, []), key=lambda x: (x[0], x[1])):
             if A < len(active_groups) and B < len(active_groups):
                 active_groups[A].extend(active_groups[B])
                 del active_groups[B]
 
-    # NEW: no real events → no demography
     if len(demog_entries) == 1:
-        return "0 0 0", []
+        return "0 0 0"
 
-    return " ".join(demog_entries), dbg_lines
+    return " ".join(demog_entries)
 
 
 # ---------- Load parameter YAML ----------
@@ -561,12 +553,16 @@ for key, val in (other_params or {}).items():
     if re.fullmatch(r"pop\d+", key):
         parameters[key] = str(val)
 
-smc_flag = parameters.get("smc", "0").strip()
 EXECUTABLE = EXECUTABLE_SMC if smc_flag == "1" else EXECUTABLE_ARG
 
 ancestor_freqs = other_params.get("AncestorFrequencies", other_params.get("ancestor_frequencies", None))
 if ancestor_freqs is not None and not isinstance(ancestor_freqs, dict):
     print(f"Error: 'AncestorFrequencies' in {PARAMETERS_YAML} must be a mapping (dict).", file=sys.stderr)
+    sys.exit(1)
+
+deme_params = other_params.get("Demes", other_params.get("demes", None))
+if deme_params is not None and not isinstance(deme_params, dict):
+    print(f"Error: 'Demes' in {PARAMETERS_YAML} must be a mapping (dict).", file=sys.stderr)
     sys.exit(1)
 
 samples_block = other_params.get("Samples", other_params.get("samples", None))
@@ -589,6 +585,24 @@ except Exception as e:
     print(f"Error loading {DEMES_YAML}: {e}", file=sys.stderr)
     sys.exit(1)
 
+def _mapping_value(mapping, *keys):
+    for key in keys:
+        if isinstance(mapping, dict) and key in mapping:
+            return mapping[key]
+    return None
+
+if deme_params:
+    leaf_names = {d.name for d in leaf_demes(graph)}
+    merged_ancestor_freqs = dict(ancestor_freqs or {})
+    for name, cfg in deme_params.items():
+        if not isinstance(cfg, dict):
+            print(f"Error: Demes.{name} in {PARAMETERS_YAML} must be a mapping.", file=sys.stderr)
+            sys.exit(1)
+        freq = _mapping_value(cfg, "inversion_frequency", "InversionFrequency", "inv_freq")
+        if freq is not None and str(name) not in leaf_names:
+            merged_ancestor_freqs[str(name)] = str(freq)
+    ancestor_freqs = merged_ancestor_freqs or None
+
 try:
     pop_sizes_str, speciation_str, debug_info = build_speciation_from_demes(
         graph,
@@ -600,6 +614,33 @@ try:
 except (NotImplementedError, ValueError) as e:
     print(f"[speciation parser] {e}", file=sys.stderr)
     sys.exit(1)
+
+if deme_params:
+    freqs = []
+    for i, leaf in enumerate(debug_info["leaf_order"]):
+        cfg = deme_params.get(leaf, {})
+        freq = _mapping_value(cfg, "inversion_frequency", "InversionFrequency", "inv_freq")
+        if freq is not None:
+            freqs.append(str(freq))
+        samples = _mapping_value(cfg, "samples", "Samples")
+        if samples is not None:
+            if parameters.get("randomSample", "0").strip() == "1":
+                print("Error: Demes.*.samples with standard/inverted counts requires RandomSample: 0.", file=sys.stderr)
+                sys.exit(1)
+            if not isinstance(samples, dict):
+                print(f"Error: Demes.{leaf}.samples must be a mapping.", file=sys.stderr)
+                sys.exit(1)
+            standard = _mapping_value(samples, "standard", "Standard")
+            inverted = _mapping_value(samples, "inverted", "Inverted")
+            if standard is None or inverted is None:
+                print(f"Error: Demes.{leaf}.samples must include standard and inverted.", file=sys.stderr)
+                sys.exit(1)
+            parameters[f"pop{i}"] = f"{standard} {inverted}"
+    if freqs:
+        if len(freqs) != len(debug_info["leaf_order"]):
+            print("Error: Demes must provide inversion_frequency for every present-day deme or use legacy InversionFrequency.", file=sys.stderr)
+            sys.exit(1)
+        parameters["inv_freq"] = " ".join(freqs)
 
 try:
     write_migration_matrices_from_demes(
@@ -613,7 +654,7 @@ except Exception as e:
     print(f"Error writing {MIGRATION_JSON}: {e}", file=sys.stderr)
     sys.exit(1)
 
-demog_str, demog_dbg = build_demography_from_demes_full(
+demog_str = build_demography_from_demes_full(
     graph,
     debug_info["leaf_order"],
     debug_info["events"]
@@ -645,11 +686,6 @@ if mig_rate is not None:
 print("\n\n--------Parsed speciation tree (past -> present)--------\n")
 ascii_tree = render_tree_ascii(graph, only_these_leaves=debug_info["leaf_order"])
 print(ascii_tree)
-
-
-parameters["popSizeVec"] = pop_sizes_str
-parameters["speciation"] = speciation_str
-parameters["demography"] = demog_str
 
 # ---------- Validation helpers for sample arguments ----------
 def _count_pops_from_graph(graph) -> int:
@@ -688,22 +724,9 @@ def _collect_per_pop_strings(parameters: dict, pops: int, random_flag: str):
             raise ValueError(f"RandomSample==0: '{key}' must have exactly 2 integers, got {len(ints)}.")
         per_pop.append(v)
 
-    if len(per_pop) != pops:
-        raise ValueError(f"RandomSample==0: expected {pops} per-pop strings, got {len(per_pop)}.")
     return per_pop
 
 # ---------- Final assembly ----------
-# Base (fixed-order) arguments up to and including randomSample:
-base_keys_common = [
-    "seed","nruns","kingman_coal","drift_sim","msOutput",
-    "popSizeVec","inv_freq","speciation","demography","inv_age",
-    "migRate","BasesPerMorgan",
-]
-base_keys_order = base_keys_common + (
-    ["invRange","randomSample"]
-    if smc_flag == "1"
-    else ["randPhi","phi","invRange","fixedSNPs","randSNPs","snpPositions","randomSample"]
-)
 cpp_args_order_before_legacy_phi = [
     "seed","nruns","kingman_coal","drift_sim","msOutput",
     "popSizeVec","inv_freq","speciation","demography","inv_age",
@@ -764,16 +787,12 @@ while True:
         break
     if ch:
         print(ch, end="", flush=True)
-        stderr_lines.append(ch)
+        if smc_flag != "1":
+            stderr_lines.append(ch)
 
 if proc.returncode != 0:
     print(f"\nExecutable exited with code {proc.returncode}", file=sys.stderr)
 
-write_output_log = (
-    smc_flag != "1"
-    or parameters.get("verbose", "1").strip() == "1"
-    or bool(parameters.get("target_snp", "").strip())
-)
-if write_output_log:
+if smc_flag != "1":
     with open("Output_log.txt", "w") as log_file:
         log_file.writelines(stderr_lines)

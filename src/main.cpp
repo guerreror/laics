@@ -22,6 +22,7 @@
 #include <iterator>
 #include <algorithm>
 #include <numeric>
+#include <cstdlib>
 using namespace std;
 
 #include <memory>
@@ -186,6 +187,14 @@ int main(int argc, const char *argv[])
         }
 
         vector<shared_ptr<ARGNode>> allNodes = world->getARGVec();
+        if (!allNodes.empty()) {
+            system("mkdir -p ARG_outputs");
+            stringstream nodesName, edgesName;
+            nodesName << "ARG_outputs/arg_nodes_run" << timer << ".tsv";
+            edgesName << "ARG_outputs/arg_edges_run" << timer << ".tsv";
+            allNodes.back()->writeTskitTables(nodesName.str(), edgesName.str());
+        }
+
         vector<double> tempLD(params.paramData->n_SNPs, 0.0);
         vector<SNPtree> trees;
         unsigned novar = 0;

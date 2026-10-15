@@ -298,7 +298,7 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
 
 
     const std::size_t outputBase = base + (randomSample ? 1 : pops);
-    paramData->smcVerbose = true;
+    paramData->gcRate = 1.0;
     if (param_vec.size() > outputBase) {
         paramData->smcVerbose = (param_vec[outputBase] == "1");
     }
@@ -327,8 +327,8 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
     }
 
     paramData->tractSize = 200.0;
-    if (param_vec.size() > outputBase + 4) {
-        paramData->tractSize = std::stod(param_vec[outputBase + 4]);
+    if (param_vec.size() > outputBase + 2) {
+        paramData->tractSize = std::stod(param_vec[outputBase + 2]);
     }
 
     paramData->homoGcRate = 0.0;

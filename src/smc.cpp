@@ -24,6 +24,7 @@
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <queue>
 #include <sys/stat.h>
 
 #include <tskit/tables.h>
@@ -33,12 +34,10 @@ using namespace std;
 #include "parameters.h"
 #include "world.h"
 #include "ran_mk.h"
-#include "sitenode.h"
-#include "snptree.h"
 #include "migprob.h"
+#include "sitenode.h"
 #include "treemod.h"
 #include "simulate_smc.h"
-#include "chromosome.h"
 #include "smc_helpers.h"
 
 std::random_device rd;
@@ -134,10 +133,10 @@ static double sampleHopDeltaFromRho(double rho)
 
 static bool pickWeightedEdge(const vector<EdgeWeight>& standard_edges,
                              const vector<EdgeWeight>& inverted_edges,
-                             unsigned long* outParent,
-                             unsigned long* outChild)
+                             TreeNode** outParentNode,
+                             TreeNode** outChildNode)
 {
-    if (!outParent || !outChild) return false;
+    if (!outParentNode || !outChildNode) return false;
     vector<EdgeWeight> all;
     all.reserve(standard_edges.size() + inverted_edges.size());
     for (const auto& e : standard_edges) if (e.weight > 0.0) all.push_back(e);
@@ -153,59 +152,78 @@ static bool pickWeightedEdge(const vector<EdgeWeight>& standard_edges,
     for (const auto& e : all) {
         cum += e.weight;
         if (roll <= cum) {
-            *outParent = e.parent;
-            *outChild = e.child;
+            *outParentNode = e.parentNode;
+            *outChildNode = e.childNode;
             return true;
         }
     }
-    *outParent = all.back().parent;
-    *outChild = all.back().child;
+    *outParentNode = all.back().parentNode;
+    *outChildNode = all.back().childNode;
     return true;
 }
 
-static bool geneFluxIdWasDeleted(const vector<unsigned long>& deletedIds, unsigned long nodeId)
-{
-    return std::find(deletedIds.begin(), deletedIds.end(), nodeId) != deletedIds.end();
-}
+struct GeneFluxBoundaryRef {
+    double endX;
+    unsigned long nodeId;
+};
 
-static void appendActiveGeneFluxEvents(vector<GeneFluxEvent_SMC>& active,
-                                       const vector<GeneFluxEvent_SMC>& incoming,
-                                       double currentX,
-                                       double eps)
-{
-    for (const auto& evt : incoming) {
-        if (evt.endX > currentX + eps) active.push_back(evt);
+struct GeneFluxBoundaryEarlier {
+    bool operator()(const GeneFluxBoundaryRef& a, const GeneFluxBoundaryRef& b) const {
+        return a.endX > b.endX;
     }
-}
+};
 
-static long firstExpiredGeneFluxEvent(const vector<GeneFluxEvent_SMC>& active,
-                                      double currentX,
-                                      double eps)
-{
-    for (size_t i = 0; i < active.size(); ++i) {
-        if (active[i].endX <= currentX + eps) return static_cast<long>(i);
-    }
-    return -1;
-}
+struct ActiveGeneFluxSet {
+    std::unordered_map<unsigned long, GeneFluxEvent_SMC> byId;
+    std::priority_queue<GeneFluxBoundaryRef,
+                        std::vector<GeneFluxBoundaryRef>,
+                        GeneFluxBoundaryEarlier> byEnd;
 
-static void removeDeletedGeneFluxEvents(vector<GeneFluxEvent_SMC>& active,
-                                        vector<GeneFluxEvent_SMC>& log,
-                                        const vector<unsigned long>& deletedIds)
-{
-    for (auto it = active.begin(); it != active.end();) {
-        if (geneFluxIdWasDeleted(deletedIds, it->nodeId)) {
-            log.push_back(*it);
-            it = active.erase(it);
-        } else {
-            ++it;
+    void prune() {
+        while (!byEnd.empty()) {
+            const auto& top = byEnd.top();
+            auto it = byId.find(top.nodeId);
+            if (it != byId.end() && std::abs(it->second.endX - top.endX) <= 1e-9) break;
+            byEnd.pop();
         }
     }
-}
+
+    size_t size() const { return byId.size(); }
+
+    void addIncoming(const vector<GeneFluxEvent_SMC>& incoming, double currentX, double eps) {
+        for (const auto& evt : incoming) {
+            if (evt.endX <= currentX + eps) continue;
+            byId[evt.nodeId] = evt;
+            byEnd.push({evt.endX, evt.nodeId});
+        }
+    }
+
+    bool firstExpired(double currentX, double eps, GeneFluxEvent_SMC& out) {
+        prune();
+        if (byEnd.empty() || byEnd.top().endX > currentX + eps) return false;
+        out = byId[byEnd.top().nodeId];
+        return true;
+    }
+
+    bool nextEnd(double& endX) {
+        prune();
+        if (byEnd.empty()) return false;
+        endX = byEnd.top().endX;
+        return true;
+    }
+
+    void erase(unsigned long nodeId) {
+        byId.erase(nodeId);
+    }
+
+    void removeDeleted(const vector<unsigned long>& deletedIds) {
+        for (unsigned long id : deletedIds) erase(id);
+    }
+};
 
 static bool processGeneFluxBoundariesAtX(
     TreeNode*& activeTree,
-    vector<GeneFluxEvent_SMC>& geneFluxActive,
-    vector<GeneFluxEvent_SMC>& geneFluxLog,
+    ActiveGeneFluxSet& geneFluxActive,
     const Parameters::ParameterData& paramData,
     const vector<vector<double>>& mig_prob_cut,
     const vector<pair<double, vector<vector<double>>>>& standard_mig_schedule,
@@ -218,14 +236,12 @@ static bool processGeneFluxBoundariesAtX(
 {
     const double eps = 1e-12;
     while (true) {
-        const long idx = firstExpiredGeneFluxEvent(geneFluxActive, currentX, eps);
-        if (idx < 0) return true;
+        GeneFluxEvent_SMC evt;
+        if (!geneFluxActive.firstExpired(currentX, eps, evt)) return true;
 
-        GeneFluxEvent_SMC evt = geneFluxActive[static_cast<size_t>(idx)];
         TreeNode* gfNode = findNodeById(activeTree, evt.nodeId);
         if (!gfNode) {
-            geneFluxLog.push_back(evt);
-            geneFluxActive.erase(geneFluxActive.begin() + idx);
+            geneFluxActive.erase(evt.nodeId);
             if (hopEvents.is_open()) {
                 hopEvents << timer << "," << hop << "," << currentX
                           << ",gene_flux_boundary_stale,,,,\n";
@@ -257,7 +273,7 @@ static bool processGeneFluxBoundariesAtX(
             return false;
         }
 
-        removeDeletedGeneFluxEvents(geneFluxActive, geneFluxLog, deletedIds);
+        geneFluxActive.removeDeleted(deletedIds);
         if (hopEvents.is_open()) {
             hopEvents << timer << "," << hop << "," << currentX
                       << ",gene_flux_boundary," << restartTime << ",,,\n";
@@ -277,7 +293,7 @@ static bool processGeneFluxBoundariesAtX(
                                               timer,
                                               nextNodeId,
                                               hopEvents);
-        appendActiveGeneFluxEvents(geneFluxActive, outcome.geneFluxEvents, currentX, eps);
+        geneFluxActive.addIncoming(outcome.geneFluxEvents, currentX, eps);
         if (!ok) {
             if (hopEvents.is_open()) {
                 for (const auto& row : outcome.eventRows) {
@@ -320,51 +336,13 @@ static void collectEdgeWeightsFromTree(
             if (branchL > 0.0) {
                 const double base = r * branchL;
                 if (child->context.inversion == 1) {
-                    inverted_edges.push_back({node->id, child->id, base * pI});
+                    inverted_edges.push_back({node->id, child->id, base * pI, node, child});
                 } else {
-                    standard_edges.push_back({node->id, child->id, base * (1.0 - pI)});
+                    standard_edges.push_back({node->id, child->id, base * (1.0 - pI), node, child});
                 }
             }
         }
         collectEdgeWeightsFromTree(child, params, r, standard_edges, inverted_edges);
-    }
-}
-
-static void writeEdgeWeightsCSV(const vector<EdgeWeight>& edges, const std::string& path)
-{
-    std::ofstream out(path.c_str());
-    if (!out.is_open()) return;
-    out << "parent,child,weight\n";
-    for (const auto& e : edges) {
-        out << e.parent << "," << e.child << "," << e.weight << "\n";
-    }
-}
-
-static void writeTreeArtifacts(TreeNode* tree, const std::string& base)
-{
-    const std::string dot = base + ".dot";
-    const std::string collapsedDot = base + "_collapsed.dot";
-    writeTreeDOT(tree, dot);
-    writeCollapsedTreeDOT(tree, collapsedDot);
-
-    std::ostringstream cmd;
-    cmd << "python3 tools/dot_to_tskit_png.py "
-        << dot
-        << " --svg " << base << ".tskit.svg";
-    const int rc = std::system(cmd.str().c_str());
-    if (rc != 0) {
-        std::cerr << "Warning: failed to render " << dot
-                  << " to tskit SVG.\n";
-    }
-
-    std::ostringstream cmdCollapsed;
-    cmdCollapsed << "python3 tools/dot_to_tskit_png.py "
-                 << collapsedDot
-                 << " --svg " << base << "_collapsed.tskit.svg";
-    const int rcCollapsed = std::system(cmdCollapsed.str().c_str());
-    if (rcCollapsed != 0) {
-        std::cerr << "Warning: failed to render " << collapsedDot
-                  << " to tskit SVG.\n";
     }
 }
 
@@ -373,7 +351,6 @@ struct TskitCNodeRecord {
     uint64_t id;
     double time;
     uint32_t pop;
-    uint16_t inversion;
 };
 
 struct TskitCEdgeInterval {
@@ -418,7 +395,6 @@ struct TskitCStore {
     std::unordered_set<TskitCNodeKey, TskitCKeyHash> seenNodes;
     std::unordered_map<TskitCEdgeKey, size_t, TskitCKeyHash> openEdges;
     std::unordered_set<TskitCEdgeKey, TskitCKeyHash> activeEdges;
-    bool enabled = true;
 
     static void checkTsk(int ret, const char* where) {
         if (ret < 0) {
@@ -433,8 +409,7 @@ struct TskitCStore {
         const TskitCNodeKey nk{static_cast<int32_t>(run), nodeId};
         if (seenNodes.insert(nk).second) {
             nodes.push_back({static_cast<int32_t>(run), nodeId, node->time,
-                             static_cast<uint32_t>(node->context.pop),
-                             static_cast<uint16_t>(node->context.inversion)});
+                             static_cast<uint32_t>(node->context.pop)});
         }
         for (auto* child : node->children) {
             if (!child) continue;
@@ -454,8 +429,8 @@ struct TskitCStore {
         }
     }
 
-    void append(TreeNode* tree, int run, int /*hop*/, double left, double right) {
-        if (!enabled || !tree) return;
+    void append(TreeNode* tree, int run, double left, double right) {
+        if (!tree) return;
         activeEdges.clear();
         activeEdges.reserve(openEdges.size() + 32);
         collect(tree, run, left, right, activeEdges);
@@ -562,7 +537,6 @@ struct TskitCStore {
     }
 
     void write(const std::string& outDir) const {
-        if (!enabled) return;
         mkdir(outDir.c_str(), 0755);
         std::unordered_map<int, std::vector<const TskitCNodeRecord*>> nodesByRun;
         std::unordered_map<int, std::vector<const TskitCEdgeInterval*>> edgesByRun;
@@ -590,19 +564,6 @@ struct TskitCStore {
         for (auto& job : jobs) job.get();
     }
 };
-
-static std::string formatCoordForFilename(double x)
-{
-    std::ostringstream ss;
-    ss << std::fixed << std::setprecision(6) << x;
-    std::string out = ss.str();
-    while (!out.empty() && out.back() == '0') out.pop_back();
-    if (!out.empty() && out.back() == '.') out.pop_back();
-    std::replace(out.begin(), out.end(), '.', 'p');
-    std::replace(out.begin(), out.end(), '-', 'm');
-    if (out.empty()) out = "0";
-    return out;
-}
 
 static void printProgress(int completed, int total, int& lastBucket)
 {
@@ -651,8 +612,22 @@ int main(int argc, const char *argv[])
 
     unsigned int nRuns = params.paramData->nRuns;
     unsigned int nSites = params.paramData->n_SNPs;
-    const bool targetMode = !params.paramData->targetSNPs.empty();
-    const bool writeAllDiagnostics = !targetMode && params.paramData->smcVerbose;
+    const bool smcProfile = std::getenv("SMC_PROFILE") != nullptr;
+    using ProfileClock = std::chrono::system_clock;
+    auto elapsedSec = [](const ProfileClock::time_point& a,
+                         const ProfileClock::time_point& b) {
+        return std::chrono::duration<double>(b - a).count();
+    };
+    auto profNow = [&]() { return smcProfile ? ProfileClock::now() : ProfileClock::time_point{}; };
+    auto profAdd = [&](double& acc, const ProfileClock::time_point& t0) {
+        if (smcProfile) acc += elapsedSec(t0, ProfileClock::now());
+    };
+    double profArg = 0.0, profBuildX0 = 0.0, profBoundary = 0.0, profWeights = 0.0;
+    double profCut = 0.0, profSim = 0.0, profAppend = 0.0, profTskWrite = 0.0;
+    double profEdgePick = 0.0, profEdgeCopy = 0.0, profFluxBook = 0.0, profTreeReplace = 0.0;
+    double profDelta = 0.0, profDiagnostics = 0.0;
+    unsigned long long profActiveMinScans = 0, profFluxRemoveScans = 0, profMaxActiveFlux = 0;
+    unsigned long long profHops = 0;
 
     std::cerr << "\n\n";
     int progressBucket = -1;
@@ -771,6 +746,7 @@ int main(int argc, const char *argv[])
         params.setSNPs();
         params.setCarriers();
 
+        auto profT0 = profNow();
         World *world = new World(params.getpData());
         while (!world->simulationFinished())
         {
@@ -784,6 +760,7 @@ int main(int argc, const char *argv[])
             }
             world->simulateGeneration_SMC(mig_prob);
         }
+        profAdd(profArg, profT0);
 
         vector<shared_ptr<ARGNode>> allNodes = world->getARGVec();
         if (nSites == 0 || allNodes.empty()) {
@@ -794,62 +771,29 @@ int main(int argc, const char *argv[])
 
         const double startX = params.paramData->smcRange.L;
         const double argStartX = startX / params.paramData->BasesPerMorgan;
-        SiteNode geneTree(argStartX, allNodes.back());
-        geneTree.calcBranchLengths(0);
-        geneTree.calcBranchLengths_informative(0);
-        if (writeAllDiagnostics) {
-            geneTree.writeCSV("genetree_first_site.csv");
-            geneTree.writeDOT("genetree_first_site.dot");
-            allNodes.back()->writeDOT("argtree.dot");
-        }
 
         const double r = 1.0e-8;
+        profT0 = profNow();
         TreeNode* activeTree = buildX0TreeFromARGPreserveUnary(argStartX, allNodes.back());
+        profAdd(profBuildX0, profT0);
         if (!activeTree) {
             std::cerr << "Could not build unary-preserving x0 tree from ARG.\n";
             delete world;
             break;
         }
-        if (writeAllDiagnostics) {
-            writeTreeDOT(activeTree, "genetree_x0_arg_unary.dot");
-            writeCollapsedTreeDOT(activeTree, "genetree_x0_arg_unary_collapsed.dot");
-        }
         unsigned long nextNodeId = getMaxId(activeTree) + 1;
         double currentX = startX;
-        treeSequences.append(activeTree, timer, 0, currentX, currentX);
-        vector<GeneFluxEvent_SMC> geneFluxActive;
-        vector<GeneFluxEvent_SMC> geneFluxLog;
-        vector<EdgeWeight> last_standard_edges;
-        vector<EdgeWeight> last_inverted_edges;
+        treeSequences.append(activeTree, timer, currentX, currentX);
+        ActiveGeneFluxSet geneFluxActive;
         vector<EdgeWeight> standard_edges;
         vector<EdgeWeight> inverted_edges;
-        vector<bool> targetEmitted(params.paramData->targetSNPs.size(), false);
-        if (targetMode) {
-            const double eps = 1e-15;
-            vector<double> x0Targets;
-            for (size_t i = 0; i < params.paramData->targetSNPs.size(); ++i) {
-                if (targetEmitted[i]) continue;
-                const double targetX = params.paramData->targetSNPs[i];
-                if (std::abs(targetX - currentX) <= eps) {
-                    x0Targets.push_back(targetX);
-                    targetEmitted[i] = true;
-                }
-            }
-            for (double targetX : x0Targets) {
-                std::ostringstream targetBase;
-                targetBase << "genetree_target"
-                           << formatCoordForFilename(targetX)
-                           << "_hop0_x" << formatCoordForFilename(currentX);
-                writeTreeArtifacts(activeTree, targetBase.str());
-            }
-        }
 
         int hop = 0;
         while (currentX < params.paramData->smcRange.R) {
             const double activeEps = 1e-12;
+            profT0 = profNow();
             if (!processGeneFluxBoundariesAtX(activeTree,
                                              geneFluxActive,
-                                             geneFluxLog,
                                              *params.paramData,
                                              mig_prob_cut,
                                              horizontal_standard_schedule,
@@ -862,56 +806,66 @@ int main(int argc, const char *argv[])
                 std::cerr << "SMC gene-flux boundary processing failed.\n";
                 break;
             }
+            profAdd(profBoundary, profT0);
 
             standard_edges.clear();
             inverted_edges.clear();
+            profT0 = profNow();
             collectEdgeWeightsFromTree(activeTree,
                                        *params.paramData,
                                        r,
                                        standard_edges,
                                        inverted_edges);
-            last_standard_edges = standard_edges;
-            last_inverted_edges = inverted_edges;
+            profAdd(profWeights, profT0);
+            profT0 = profNow();
             double Ls_sum = 0.0, Li_sum = 0.0;
             for (const auto &e : standard_edges) Ls_sum += e.weight;
             for (const auto &e : inverted_edges) Li_sum += e.weight;
+            profAdd(profEdgeCopy, profT0);
             const double rho = Ls_sum + Li_sum;
             if (rho <= 0.0) {
                 break;
             }
-            std::unordered_map<unsigned long, TreeNode*> clonedNodes;
-            TreeNode* workingTree = cloneTreeWithMap(activeTree, clonedNodes);
-            unsigned long cutParentId = 0;
-            unsigned long cutChildId = 0;
-            bool picked = pickWeightedEdge(standard_edges, inverted_edges, &cutParentId, &cutChildId);
+            TreeNode* p = nullptr;
+            TreeNode* c = nullptr;
+            profT0 = profNow();
+            bool picked = pickWeightedEdge(standard_edges,
+                                           inverted_edges,
+                                           &p,
+                                           &c);
+            profAdd(profEdgePick, profT0);
             if (!picked) {
-                freeTree(workingTree);
                 std::cerr << "SMC cut-tree step failed (could not sample weighted edge).\n";
                 break;
             }
-            TreeNode* p = clonedNodes.count(cutParentId) ? clonedNodes[cutParentId] : nullptr;
-            TreeNode* c = clonedNodes.count(cutChildId) ? clonedNodes[cutChildId] : nullptr;
             if (!p || !c || c->parent != p) {
-                freeTree(workingTree);
                 std::cerr << "SMC cut-tree step failed (sampled edge not found in tree).\n";
                 break;
             }
+            TreeNode* workingTree = activeTree;
             TreeNode* cutSubtree = nullptr;
             double cutStartTime = 0.0;
             vector<unsigned long> deletedIds;
+            profT0 = profNow();
             bool cutOk = cutEdgeRandomWithCleanupCollect(workingTree,
                                                          p,
                                                          c,
                                                          &cutSubtree,
                                                          &cutStartTime,
                                                          deletedIds);
+            profAdd(profCut, profT0);
             if (!cutOk) {
-                freeTree(workingTree);
+                activeTree = workingTree;
+                if (cutSubtree && !cutSubtree->parent) freeTree(cutSubtree);
                 std::cerr << "SMC cut-tree step skipped (invalid cut edge).\n";
                 break;
             }
-            removeDeletedGeneFluxEvents(geneFluxActive, geneFluxLog, deletedIds);
+            profT0 = profNow();
+            profFluxRemoveScans += deletedIds.size();
+            geneFluxActive.removeDeleted(deletedIds);
+            profAdd(profFluxBook, profT0);
             SMCStepOutcome outcome;
+            profT0 = profNow();
             bool ok = simulateSMCOnTree_SMC(workingTree,
                                             cutSubtree,
                                             cutStartTime,
@@ -925,8 +879,12 @@ int main(int argc, const char *argv[])
                                             timer,
                                             nextNodeId,
                                             hopEvents);
+            profAdd(profSim, profT0);
 
-            appendActiveGeneFluxEvents(geneFluxActive, outcome.geneFluxEvents, currentX, activeEps);
+            profT0 = profNow();
+            geneFluxActive.addIncoming(outcome.geneFluxEvents, currentX, activeEps);
+            if (geneFluxActive.size() > profMaxActiveFlux) profMaxActiveFlux = geneFluxActive.size();
+            profAdd(profFluxBook, profT0);
 
             if (!ok) {
                 if (hopEvents.is_open()) {
@@ -939,15 +897,18 @@ int main(int argc, const char *argv[])
                                << "reattach_failed,"
                                << ",,,\n";
                 }
-                freeTree(workingTree);
+                activeTree = workingTree;
+                if (cutSubtree && !cutSubtree->parent) freeTree(cutSubtree);
                 std::cerr << "SMC cut-tree step failed to reattach.\n";
                 break;
             }
 
+            profT0 = profNow();
             trimUnaryRootStem(workingTree);
-            freeTree(activeTree);
             activeTree = workingTree;
+            profAdd(profTreeReplace, profT0);
 
+            profT0 = profNow();
             const double rawHopDelta = sampleHopDeltaFromRho(rho);
             if (rawHopDelta <= 0.0) {
                 break;
@@ -961,71 +922,25 @@ int main(int argc, const char *argv[])
             }
             double nextX = currentX + hopDelta;
 
-            if (!geneFluxActive.empty()) {
-                size_t minIdx = 0;
-                for (size_t i = 1; i < geneFluxActive.size(); ++i) {
-                    if (geneFluxActive[i].endX < geneFluxActive[minIdx].endX) {
-                        minIdx = i;
-                    }
-                }
-                const GeneFluxEvent_SMC minEvt = geneFluxActive[minIdx];
-                if (nextX >= minEvt.endX) {
-                    nextX = minEvt.endX;
+            double nextFluxEnd = 0.0;
+            if (geneFluxActive.nextEnd(nextFluxEnd)) {
+                ++profActiveMinScans;
+                if (nextX >= nextFluxEnd) {
+                    nextX = nextFluxEnd;
                 }
             }
             const double finalHopDelta = nextX - currentX;
             if (finalHopDelta <= 0.0) {
+                profAdd(profDelta, profT0);
                 continue;
             }
-            treeSequences.append(activeTree, timer, hop + 1, currentX, nextX);
+            profAdd(profDelta, profT0);
+            profT0 = profNow();
+            treeSequences.append(activeTree, timer, currentX, nextX);
+            profAdd(profAppend, profT0);
+            ++profHops;
 
-            bool writeThisHop = writeAllDiagnostics;
-            vector<double> targetsForThisHop;
-            if (targetMode) {
-                const double eps = 1e-15;
-                for (size_t i = 0; i < params.paramData->targetSNPs.size(); ++i) {
-                    if (targetEmitted[i]) continue;
-                    const double targetX = params.paramData->targetSNPs[i];
-                    if (targetX < currentX - eps) {
-                        targetEmitted[i] = true;
-                        continue;
-                    }
-                    if (targetX <= nextX + eps) {
-                        writeThisHop = true;
-                        targetsForThisHop.push_back(targetX);
-                        targetEmitted[i] = true;
-                    }
-                }
-            }
-
-            if (writeThisHop) {
-                vector<std::string> artifactBases;
-                if (targetMode) {
-                    for (double targetX : targetsForThisHop) {
-                        std::ostringstream targetBase;
-                        targetBase << "genetree_target"
-                                   << formatCoordForFilename(targetX)
-                                   << "_hop" << (hop + 1)
-                                   << "_x" << formatCoordForFilename(currentX)
-                                   << "_to_" << formatCoordForFilename(nextX);
-                        artifactBases.push_back(targetBase.str());
-                    }
-                } else {
-                    std::ostringstream hopBase;
-                    hopBase << "genetree_hop" << (hop + 1);
-                    artifactBases.push_back(hopBase.str());
-                }
-
-                for (const auto& hopBase : artifactBases) {
-                    writeTreeArtifacts(activeTree, hopBase);
-
-                    if (targetMode) {
-                        writeEdgeWeightsCSV(standard_edges, hopBase + "_edge_weights_standard.csv");
-                        writeEdgeWeightsCSV(inverted_edges, hopBase + "_edge_weights_inverted.csv");
-                    }
-                }
-            }
-
+            profT0 = profNow();
             {
                 if (hopTrace.is_open()) {
                     hopTrace << std::setprecision(17);
@@ -1058,52 +973,12 @@ int main(int argc, const char *argv[])
             }
             currentX = nextX;
             ++hop;
-        }
-
-        if (writeAllDiagnostics) {
-            std::ofstream gf_active("smc_gene_flux_active.csv");
-            if (gf_active.is_open()) {
-                gf_active << "x_start,x_end,node_id,type\n";
-                for (const auto& evt : geneFluxActive) {
-                    gf_active << evt.startX << "," << evt.endX << "," << evt.nodeId
-                              << "," << evt.type << "\n";
-                }
-            }
-        }
-        if (writeAllDiagnostics) {
-            std::ofstream gf_log("smc_gene_flux_log.csv");
-            if (gf_log.is_open()) {
-                gf_log << "x_start,x_end,node_id,type\n";
-                for (const auto& evt : geneFluxLog) {
-                    gf_log << evt.startX << "," << evt.endX << "," << evt.nodeId
-                           << "," << evt.type << "\n";
-                }
-            }
+            profAdd(profDiagnostics, profT0);
         }
 
         if (hopEvents.is_open()) hopEvents.flush();
         if (hopTrace.is_open()) hopTrace.flush();
-
-        if (writeAllDiagnostics) {
-            writeTreeDOT(activeTree, "genetree_modified.dot");
-        }
         freeTree(activeTree);
-
-        if (writeAllDiagnostics) {
-            double std_len = 0.0;
-            double inv_len = 0.0;
-            geneTree.getTotalLengthByInversion(std_len, inv_len);
-            std::cerr << "Ls(x) = " << std_len << "\n";
-            std::cerr << "Li(x) = " << inv_len << "\n";
-            std::cerr << "L(x) = " << (std_len + inv_len) << "\n";
-            std::cerr << "L(x) (getTotalLength func) = "
-                      << geneTree.getTotalLength(0.0) << "\n";
-        }
-
-        if (writeAllDiagnostics) {
-            writeEdgeWeightsCSV(last_standard_edges, "edge_weights_standard.csv");
-            writeEdgeWeightsCSV(last_inverted_edges, "edge_weights_inverted.csv");
-        }
 
         treeSequences.finishRun(timer);
         delete world;
@@ -1111,9 +986,31 @@ int main(int argc, const char *argv[])
     }
 
     end = std::chrono::system_clock::now();
+    auto writeStart = profNow();
     treeSequences.write("smc_trees");
+    if (smcProfile) profTskWrite = elapsedSec(writeStart, ProfileClock::now());
     std::chrono::duration<double> elapsed_seconds = end - start;
     std::cerr << "Elapsed time: " << elapsed_seconds.count() << "s\n";
+    if (smcProfile) {
+        std::cerr << "SMC_PROFILE hops=" << profHops << "\n";
+        std::cerr << "SMC_PROFILE arg_generation=" << profArg << "\n";
+        std::cerr << "SMC_PROFILE build_x0=" << profBuildX0 << "\n";
+        std::cerr << "SMC_PROFILE gene_flux_boundary=" << profBoundary << "\n";
+        std::cerr << "SMC_PROFILE collect_edge_weights=" << profWeights << "\n";
+        std::cerr << "SMC_PROFILE cut_cleanup=" << profCut << "\n";
+        std::cerr << "SMC_PROFILE vertical_simulation=" << profSim << "\n";
+        std::cerr << "SMC_PROFILE tsk_collect=" << profAppend << "\n";
+        std::cerr << "SMC_PROFILE tsk_write=" << profTskWrite << "\n";
+        std::cerr << "SMC_PROFILE edge_pick=" << profEdgePick << "\n";
+        std::cerr << "SMC_PROFILE edge_copy_sum=" << profEdgeCopy << "\n";
+        std::cerr << "SMC_PROFILE gene_flux_bookkeeping=" << profFluxBook << "\n";
+        std::cerr << "SMC_PROFILE tree_replace_free=" << profTreeReplace << "\n";
+        std::cerr << "SMC_PROFILE delta_and_boundaries=" << profDelta << "\n";
+        std::cerr << "SMC_PROFILE diagnostics_checks=" << profDiagnostics << "\n";
+        std::cerr << "SMC_PROFILE active_min_scan_items=" << profActiveMinScans << "\n";
+        std::cerr << "SMC_PROFILE flux_remove_scan_items=" << profFluxRemoveScans << "\n";
+        std::cerr << "SMC_PROFILE max_active_gene_flux=" << profMaxActiveFlux << "\n";
+    }
 
     return 0;
 }

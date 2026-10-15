@@ -108,10 +108,11 @@ class ARGNode
 	vector<Segment> getDescendantSegmentVector(unsigned long i) const;	// Get descendant segment vector i
 // Output data for this node:
 	void outputNode();								// Prints out the node's data
-	void outputARG();								// Prints out the ARG descending from this node 
-	void gatherAllNodes(unordered_set<const ARGNode*>& seen, vector<const ARGNode*>& out) const;
-	void writeDOT(const string &filename) const;
-};
+		void outputARG();								// Prints out the ARG descending from this node
+		void gatherAllNodes(unordered_set<const ARGNode*>& seen, vector<const ARGNode*>& out) const;
+		void writeDOT(const string &filename) const;
+		void writeTskitTables(const string &nodesFilename, const string &edgesFilename) const;
+	};
 
 
 #endif //ARGNODE_
