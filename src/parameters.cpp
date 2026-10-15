@@ -327,8 +327,8 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
     }
 
     paramData->tractSize = 200.0;
-    if (param_vec.size() > outputBase + 2) {
-        paramData->tractSize = std::stod(param_vec[outputBase + 2]);
+    if (param_vec.size() > outputBase + 4) {
+        paramData->tractSize = std::stod(param_vec[outputBase + 4]);
     }
 
     paramData->homoGcRate = 0.0;

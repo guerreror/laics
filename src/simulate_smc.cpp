@@ -526,7 +526,7 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
                 : standard_mig_schedule;
             const auto& activeMig = migrationMatrixAtTime_SMC(
                 lineageSchedule, mig_prob, currentTime);
-            totalM_i[i] = computeTotalM_SMC(lineages[i], params, activeMig);
+            totalM_i[i] = computeTotalM_SMC(lineages[i], activeMig);
             totalG_i[i] = computeTotalG_SMC(lineages[i], params, currentTime, currentHopX);
             totalM += totalM_i[i];
             totalG += totalG_i[i];
@@ -727,17 +727,10 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
                 return true;
             }
             std::cerr << "SMC reattachment failed: above-root simulation did not coalesce.\n";
-            recordEventRow_SMC(outcome, evlog, runIndex, hopIndex, currentHopX,
+            recordEventRow_SMC(evlog, runIndex, hopIndex, currentHopX,
                                "above_root_fallback_failed", root_time);
-            if (outcome) {
-                outcome->coalesced = false;
-                outcome->hitRootLimit = true;
-                outcome->stopTime = root_time;
-            }
             return false;
         }
-
-        SMCEpochs_SMC epochs = buildEpochBreaks_SMC(mainRoot, lineageTime);
 
         // Each compatible retained-tree branch contributes one pairwise rate.
         std::vector<ReattachCandidate_SMC> eligibleTargets;
@@ -749,7 +742,7 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
             : standard_mig_schedule;
         const auto& activeMig = migrationMatrixAtTime_SMC(
             lineageSchedule, mig_prob, lineageTime);
-        double totalM = computeTotalM_SMC(cutRoot, params, activeMig);
+        double totalM = computeTotalM_SMC(cutRoot, activeMig);
 
         double pairRate = computeTotalC_SMC(params, lineageTime, cutRoot->context);
         double totalC = static_cast<double>(eligibleTargets.size()) * pairRate;
@@ -879,6 +872,7 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
 unsigned short World::simulateGeneration_SMC(vector<vector<double>>& mig_prob) {
     DBG(">> Simulating Generation (SMC) " << worldData->generation);
 
+    vector<vector<double>> migmap;
     vector<double> mRate;
     vector<double> cRate;
     double totalM = 0;
@@ -893,6 +887,7 @@ unsigned short World::simulateGeneration_SMC(vector<vector<double>>& mig_prob) {
             double clustSize = worldData->freq.at(clustID) * worldData->popSize.at(pop);
 
             vector<double> mfreq = getSizebyPop(cxt);
+            vector<double> migs;
             double b_mig_total = 0;
             for (int l = 0; l < worldData->nPops; ++l) {
                 if (l != pop) {
@@ -905,6 +900,7 @@ unsigned short World::simulateGeneration_SMC(vector<vector<double>>& mig_prob) {
                     migs.push_back(0);
                 }
             }
+            migmap.push_back(migs);
 
             mRate.push_back(k * b_mig_total);
             totalM += mRate[clustID];
@@ -919,6 +915,8 @@ unsigned short World::simulateGeneration_SMC(vector<vector<double>>& mig_prob) {
                 totalC += ka;
             }
         } else {
+            vector<double> dum(1, 0);
+            migmap.push_back(dum);
             mRate.push_back(0);
         }
     }
@@ -941,7 +939,7 @@ unsigned short World::simulateGeneration_SMC(vector<vector<double>>& mig_prob) {
         worldData->generation += waiting_t;
         double event = randreal(0, 1);
         if (Rate > 0) {
-            if (event < totalM / Rate) nEvents += migrateEvent_SMC(mRate, totalM);
+            if (event < totalM / Rate) nEvents += migrateEvent_SMC(migmap, mRate, totalM);
             else nEvents += coalesceEvent_SMC(cRate, totalC);
         }
     }
@@ -1002,7 +1000,9 @@ void World::updateToNextEpoch_SMC() {
     worldData->current_epoch = into_epoch;
 }
 
-unsigned short World::migrateEvent_SMC(vector<double>& rate, double total) {
+unsigned short World::migrateEvent_SMC(vector<vector<double>>& mig_prob,
+                                       vector<double>& rate,
+                                       double total) {
     map<double, int> whichClust;
     double add = 0;
     for (cluster_t::iterator i = cluster.begin(); i != cluster.end(); ++i) {

@@ -47,17 +47,6 @@ compile-arg:
 		-o labp_v21
 	@mv -f "$(SRC)/labp_v21" "$(EXEC_ARG)"
 
-compile-arg:
-	@cd "$(SRC)" && g++ -std=c++14 -O3 -g -fno-omit-frame-pointer \
-		-I /opt/homebrew/opt/boost/include \
-		-I /opt/homebrew/opt/yaml-cpp/include \
-		-L /opt/homebrew/opt/boost/lib \
-		-L /opt/homebrew/opt/yaml-cpp/lib \
-		main.cpp argnode.cpp chromosome.cpp poisevents.cpp simulate.cpp sitenode.cpp migprob.cpp world.cpp parameters.cpp chromrecomb.cpp \
-		-lboost_random -lboost_system -lboost_math_c99 -lyaml-cpp \
-		-o labp_v21
-	@mv -f "$(SRC)/labp_v21" "$(ARG_EXEC)"
-
 render-arg:
 	@cd "$(ROOT)" && "$(PYTHON)" tools/arg_tree_generation.py --input-dir ARG_outputs --output-dir ARG_outputs
 
