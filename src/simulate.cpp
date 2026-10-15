@@ -134,7 +134,7 @@ unsigned short World::simulateGeneration(vector < vector <double> > & mig_prob){
             for(int carrierID = 0; carrierID < k; ++carrierID){
                 const double oppositeFrequency = 1.0 - freqI;
                 const double carrierHomoGcRate =
-                    freqI * worldData->gcRate * inversionLengthBp;
+                    freqI * worldData->homoGcRate * inversionLengthBp;
                 const double carrierHeteroGcRate =
                     oppositeFrequency * worldData->gcRate * inversionLengthBp;
                 const double carrierDrRate =

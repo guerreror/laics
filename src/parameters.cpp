@@ -331,9 +331,14 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
         paramData->tractSize = std::stod(param_vec[outputBase + 4]);
     }
 
-    paramData->hopInformation = false;
+    paramData->homoGcRate = 0.0;
     if (param_vec.size() > outputBase + 5) {
-        paramData->hopInformation = (param_vec[outputBase + 5] == "1");
+        paramData->homoGcRate = std::stod(param_vec[outputBase + 5]);
+    }
+
+    paramData->hopInformation = false;
+    if (param_vec.size() > outputBase + 6) {
+        paramData->hopInformation = (param_vec[outputBase + 6] == "1");
     }
 
     std::cerr << "Verbose " << paramData->smcVerbose << '\n';
@@ -346,7 +351,8 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
         }
         std::cerr << '\n';
     }
-    std::cerr << "Gene Conversion Rate: " << paramData->gcRate << '\n';
+    std::cerr << "Heterokaryotypic Gene Conversion Rate: " << paramData->gcRate << '\n';
+    std::cerr << "Homokaryotypic Gene Conversion Rate: " << paramData->homoGcRate << '\n';
     std::cerr << "Double Recombination Rate: " << paramData->drRate << '\n';
     std::cerr << "Tract Size: " << paramData->tractSize << '\n';
     std::cerr << "Hop information: " << paramData->hopInformation << '\n';

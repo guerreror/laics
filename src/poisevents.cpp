@@ -175,7 +175,7 @@ unsigned short World::recombine_all(){
 			const double oppositeFrequency = 1.0 - freqI;
 			double drRate = oppositeFrequency * worldData->drRate;
 			double homoGcRate =
-				freqI * worldData->gcRate * inversionLengthBp;
+				freqI * worldData->homoGcRate * inversionLengthBp;
 			double heteroGcRate =
 				oppositeFrequency * worldData->gcRate * inversionLengthBp;
             double hetRate = (1- freqI)* chrom->getHeteroLength(worldData->invRange);

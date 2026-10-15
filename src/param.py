@@ -54,6 +54,7 @@ parameters = {
     "verbose":      "1",
     "target_snp":   "",
     "gc":           "0.0",
+    "homo_gc":      "0.0",
     "dr":           "0.0",
     "tractSize":    "200",
     "hopInformation": "0",
@@ -78,7 +79,9 @@ YAML_KEY_ALIASES = {
     "SMC": "smc",
     "Verbose": "verbose",
     "TargetSNPs": "target_snp",
+    "HeterokaryotypicGeneConversionRate": "gc",
     "GeneConversionRate": "gc",
+    "HomokaryotypicGeneConversionRate": "homo_gc",
     "DoubleRecombinationRate": "dr",
     "TractSize": "tractSize",
     "HopInformation": "hopInformation",
@@ -107,7 +110,8 @@ DISPLAY_KEY_NAMES = {
     "smc": "SMC",
     "verbose": "Verbose",
     "target_snp": "TargetSNPs",
-    "gc": "GeneConversionRate",
+    "gc": "HeterokaryotypicGeneConversionRate",
+    "homo_gc": "HomokaryotypicGeneConversionRate",
     "dr": "DoubleRecombinationRate",
     "tractSize": "TractSize",
     "hopInformation": "HopInformation",
@@ -542,6 +546,10 @@ except Exception as e:
     print(f"Error loading {PARAMETERS_YAML}: {e}", file=sys.stderr)
     sys.exit(1)
 
+# A parameter file may select its own demographic model. If omitted, retain
+# the historical src/demes.yaml default.
+DEMES_YAML = str(other_params.get("DemesFile", DEMES_YAML))
+
 # Copy keys from parameter YAML
 for key, val in (other_params or {}).items():
     key = YAML_KEY_ALIASES.get(str(key), str(key))
@@ -728,6 +736,7 @@ args_list += [
     parameters["gc"],
     parameters["dr"],
     parameters["tractSize"],
+    parameters["homo_gc"],
 ]
 
 if smc_flag == "1":

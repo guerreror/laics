@@ -113,6 +113,7 @@ struct World::WorldData		// Structure with the private data for World, accessed 
     bool drift;
     vector<double> snpSites;
 	Segment invRange;
+	double homoGcRate;
 	double gcRate;
 	double drRate;
 	double basesPerMorgan;

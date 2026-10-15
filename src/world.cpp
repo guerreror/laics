@@ -88,6 +88,7 @@ World::World(shared_ptr<Parameters::ParameterData> p){
 	worldData->snpSites = p->neut_site;
 	worldData->invRange = p->invRange;
 	worldData->drRate=p->drRate;
+	worldData->homoGcRate=p->homoGcRate;
 	worldData->gcRate=p->gcRate;
 	worldData->basesPerMorgan=p->BasesPerMorgan;
 	worldData->tractSize=p->tractSize;

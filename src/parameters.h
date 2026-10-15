@@ -65,6 +65,7 @@
      std::vector<double> neut_site;
      bool smcVerbose;
      std::vector<double> targetSNPs;
+     double homoGcRate;
      double gcRate;
      double drRate;
      double tractSize;
