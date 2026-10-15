@@ -5,9 +5,6 @@ pytest/
 __pycache__/
 build/
 smc_trees/
-batch_outputs/
-ARG_outputs/
-*.dSYM/
 labp_v17.xcodeproj/
 run.trace/
 run4.trace/
@@ -24,19 +21,8 @@ src/labp_v21.dSYM/
 # Files to ignore
 .DS_Store
 *.pyc
-*.sites
-*.stats
-*.log
-migration_matrices.json
-original_migration_matrices.json
-plot*_hops_*.png
 smc_hop_trace.csv
 smc_hop_events.csv
-smc_gene_flux_*.csv
-edge_weights_*.csv
-genetree_*
-argtree.dot
-Output_log.txt
 samp.py
 samp_tree.png
 samp_tree.svg

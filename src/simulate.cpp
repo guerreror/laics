@@ -57,13 +57,20 @@ unsigned short World::simulateGeneration(vector < vector <double> > & mig_prob){
     vector<double> cRate;
     vector<double> rRate;
     vector<double> hRate;
-    vector<double> dRate;
+    vector<double> drRates;
+    vector<double> homoGcRates;
+    vector<double> heteroGcRates;
     
     double totalM=0;
     double totalC=0;
     double totalR=0;
     double totalH=0;
-    double totalD=0;
+    double totalDR=0;
+    double totalHomoGC=0;
+    double totalHeteroGC=0;
+    const double inversionLengthBp =
+        (worldData->invRange.R - worldData->invRange.L) *
+        worldData->basesPerMorgan;
     
     for( cluster_t::iterator i = cluster.begin(); i != cluster.end(); ++i ) {
         Context cxt =i->first;
@@ -89,8 +96,10 @@ unsigned short World::simulateGeneration(vector < vector <double> > & mig_prob){
                 if(l!=pop){
                     double q1q2 = 0;
                     if(mfreq.at(pop) > 0) q1q2 = mfreq.at(l)/mfreq.at(pop);
-                    b_mig_total += mig_prob.at(pop).at(l) * q1q2;
-                    migs.push_back(b_mig_total);
+                    // BT changed so that the migration rate is adjusted by the relative frequency of the inv context in the source and destination populations
+                    const double adjusted_mig = mig_prob.at(pop).at(l) * q1q2;
+                    b_mig_total += adjusted_mig;
+                    migs.push_back(adjusted_mig);
                 }
                 else migs.push_back(0);
             }
@@ -123,21 +132,36 @@ unsigned short World::simulateGeneration(vector < vector <double> > & mig_prob){
             }
             
             for(int carrierID = 0; carrierID < k; ++carrierID){
-                double doubrec = (1-freqI)* worldData->phi;
-                dRate.push_back( doubrec );
-                totalD += doubrec;
-                CDBG("				doubrec = " <<doubrec)
+                const double oppositeFrequency = 1.0 - freqI;
+                const double carrierHomoGcRate =
+                    freqI * worldData->homoGcRate * inversionLengthBp;
+                const double carrierHeteroGcRate =
+                    oppositeFrequency * worldData->gcRate * inversionLengthBp;
+                const double carrierDrRate =
+                    oppositeFrequency * worldData->drRate;
+
+                homoGcRates.push_back(carrierHomoGcRate);
+                heteroGcRates.push_back(carrierHeteroGcRate);
+                drRates.push_back(carrierDrRate);
+
+                totalHomoGC += carrierHomoGcRate;
+                totalHeteroGC += carrierHeteroGcRate;
+                totalDR += carrierDrRate;
+                CDBG("				homo gc = " <<carrierHomoGcRate)
+                CDBG("				hetero gc = " <<carrierHeteroGcRate)
+                CDBG("				dr = " <<carrierDrRate)
                 
             }
             
         }
         else{vector<double> dum (1,0); migmap.push_back(dum);mRate.push_back(0);}
     }
-    
+
     ///////////////////
     
     int nEvents=0;
-    double Rate= totalM+ totalC+ totalR+ totalH + totalD;
+    double Rate = totalM + totalC + totalR + totalH + totalDR
+        + totalHomoGC + totalHeteroGC;
     double waiting_t= randexp(Rate);
     
     CDBG("total Rate ="<<Rate)
@@ -152,9 +176,20 @@ unsigned short World::simulateGeneration(vector < vector <double> > & mig_prob){
             CDBG("event = "<<event<<"\n")
             if (event < totalM/Rate) nEvents+= migrateEvent(migmap, mRate, totalM);
             else if (event < (totalM+totalC)/Rate) nEvents+=coalesceEvent(cRate, totalC);
-            else if (event < (totalM+totalC+totalR)/Rate)			nEvents+= recombineEvent(rRate, totalR, false, false);
-            else if (event < (totalM+totalC+totalR+totalH)/Rate)	nEvents+= recombineEvent(hRate, totalH, true, false);
-            else													nEvents+= recombineEvent(dRate, totalD, true, true);
+            else if (event < (totalM+totalC+totalR)/Rate)			nEvents+= recombineEvent(rRate, totalR, RecombinationType::Homokaryotypic);
+            else if (event < (totalM+totalC+totalR+totalH)/Rate)	nEvents+= recombineEvent(hRate, totalH, RecombinationType::Heterokaryotypic);
+            else if (event < (totalM+totalC+totalR+totalH+totalHomoGC)/Rate)
+                nEvents += recombineEvent(
+                    homoGcRates,
+                    totalHomoGC,
+                    RecombinationType::HomokaryotypicGeneConversion);
+            else if (event < (totalM+totalC+totalR+totalH+totalHomoGC+totalHeteroGC)/Rate)
+                nEvents += recombineEvent(
+                    heteroGcRates,
+                    totalHeteroGC,
+                    RecombinationType::HeterokaryotypicGeneConversion);
+            else
+                nEvents += recombineEvent(drRates, totalDR, RecombinationType::DoubleRecombination);
         }
     }
     else { // Simulation is running gen-by-gen
@@ -316,9 +351,9 @@ void World::speciation() {
 
 
 void World::freqStepToLoss(){
-    
+    // Past the inversion origin, every active population is entirely standard.
     for( cluster_t::iterator iter = cluster.begin(); iter != cluster.end(); ++iter ){
-        if(worldData->originCtx ==(*iter).first){
+        if((*iter).first.inversion == 0){
             worldData->freq[(*iter).second] = 1.0;
         }
         else{
@@ -369,11 +404,36 @@ unsigned short World::migrateEvent(vector < vector< double> >& mig_prob, vector<
     shared_ptr<Chromosome> chrom = worldData->carriers->at(c).at(who);	// Get the migrant carrier
     
     
+    // replacing whereto=0; if( chrom->getContext().pop==0) whereto=1;
+    // Now we need to figure out where the carrier is going.
+    // We use the migration probability vector for this context, and scale it to 1.
+    const vector<double>& destinationRates = mig_prob.at(c);
+    double destinationTotal = 0.0;
+    for (double destinationRate : destinationRates) {
+        destinationTotal += destinationRate;
+    }
+    if (destinationTotal <= 0.0) {
+        std::cerr << "Error in World::migrateEvent(): selected context has no migration destination\n";
+        return 0;
+    }
+
+    // Now we select the destination population based on the scaled migration probabilities.
+    const double destinationRoll = randreal(0, destinationTotal);
+    double destinationCumulative = 0.0;
+    int whereto = -1;
+    for (size_t destination = 0; destination < destinationRates.size(); ++destination) {
+        // Skip destinations with zero migration rate
+        if (destinationRates[destination] <= 0.0) continue;
+        destinationCumulative += destinationRates[destination];
+        // If the random roll falls within the cumulative range, select this destination
+        if (destinationRoll <= destinationCumulative) {
+            whereto = static_cast<int>(destination);
+            break;
+        }
+    }
+
     vector<shared_ptr<Chromosome> >::iterator pos = worldData->carriers->at(c).begin() + who;
     worldData->carriers->at(c).erase(pos);
-    
-    //THIS FIX ASSUMES TWO POPS ONLY!!! MUST CHANGE
-    int whereto=0; if( chrom->getContext().pop==0) whereto=1;
     
     
     chrom->setPopulation(whereto);													// change the context of this carrier to its new population
@@ -484,7 +544,7 @@ unsigned short World::coalesceEvent(vector<double>& rate, double total){
         return 1;
     }
 }//************************************end of coalesceEvent()
-unsigned short World::recombineEvent(vector<double>& rate, double total, bool hetero, bool gflux ){
+unsigned short World::recombineEvent(vector<double>& rate, double total, RecombinationType type){
     
     /*
      // this function runs one recombination event between a carrier and a non-carrier
@@ -518,7 +578,8 @@ unsigned short World::recombineEvent(vector<double>& rate, double total, bool he
      
      */
     
-    RCDBG( "Recombination (hetero= "<<(int)hetero<<", double ="<<(int) gflux <<") happened in gen "<<nGenerations())
+    RCDBG("Recombination type " << static_cast<int>(type)
+          << " happened in gen " << nGenerations())
     
     if (total <= 0) return 0;
 
@@ -566,7 +627,7 @@ unsigned short World::recombineEvent(vector<double>& rate, double total, bool he
     shared_ptr<Chromosome> chrom = carriers[chosenCluster][chosenCarrier];			// Get the recombining carrier
     
     // create new chromosome
-    shared_ptr<Chromosome> chrom2 = recomb_Wrap(chrom, hetero, gflux);
+    shared_ptr<Chromosome> chrom2 = recomb_Wrap(chrom, type);
     
     carriers[chosenCluster].erase(carriers[chosenCluster].begin() + chosenCarrier); //erase chrom from old context
     
@@ -584,7 +645,7 @@ unsigned short World::recombineEvent(vector<double>& rate, double total, bool he
     
 }
 
-shared_ptr<Chromosome> World::recomb_Wrap(shared_ptr<Chromosome> chrom, bool hetero, bool gflux){
+shared_ptr<Chromosome> World::recomb_Wrap(shared_ptr<Chromosome> chrom, RecombinationType type){
     
     // Make a new ARG node
     //
@@ -597,14 +658,22 @@ shared_ptr<Chromosome> World::recomb_Wrap(shared_ptr<Chromosome> chrom, bool het
 
     // Make two recombinant chromosomes	
     shared_ptr<Chromosome> chrom2;
-    int h= static_cast<int> (hetero); if (chrom->getInv()==h) {h=0;} else {h=1;}
-    Context other_ctx (chrom->getPopulation(), h);				
+    // changed from "type != homokaryotypic recomb" because homoGC is not the opposite arrangement, so we have to list them all now
+    const bool hetero =
+        type == RecombinationType::Heterokaryotypic ||
+        type == RecombinationType::HeterokaryotypicGeneConversion ||
+        type == RecombinationType::DoubleRecombination;
+    // use the opposite arrangement for a heterokaryotypic event; otherwise use the same arrangement
+    const int partnerInversion = hetero
+        ? 1 - chrom->getInv()
+        : chrom->getInv();
+    Context other_ctx(chrom->getPopulation(), partnerInversion);
     const int inv2_before = other_ctx.inversion;
     
-    if(gflux){
+    if(type == RecombinationType::DoubleRecombination){
         double mid= (worldData->invRange.R - worldData->invRange.L)/2 + worldData->invRange.L;
-        double bp1= randreal(worldData->invRange.L, mid);
-        double bp2= randreal(mid, worldData->invRange.R);
+        const double bp1 = randreal(worldData->invRange.L, mid);
+        const double bp2 = randreal(mid, worldData->invRange.R);
         /*	cout<<"bp1 "<<bp1<<", bp2 "<<bp2<<'\n'; 
          cout<<"before"<<'\n';
          cout<<"InvSegs ";for(int i=0;i<chrom->get_Inv_Segs().size();++i)cout<<chrom->get_Inv_Segs().at(i).L<<" "; cout<<'\n';
@@ -619,12 +688,20 @@ shared_ptr<Chromosome> World::recomb_Wrap(shared_ptr<Chromosome> chrom, bool het
          cout<<"StdSegs2 ";for(int i=0;i<chrom2->get_Std_Segs().size();++i)cout<<chrom2->get_Std_Segs().at(i).L<<" ";cout<<'\n';
          */
     }
+    else if(type == RecombinationType::HomokaryotypicGeneConversion ||
+            type == RecombinationType::HeterokaryotypicGeneConversion){
+        const double bp1 = randreal(worldData->invRange.L, worldData->invRange.R);
+        const double gcTractLength = worldData->tractSize / worldData->basesPerMorgan;
+        const double bp2 = std::min(bp1 + gcTractLength, worldData->invRange.R);
+
+        chrom2 = chrom->doubrecombine(bp1, bp2, newNode, other_ctx, worldData->invRange);
+    }
     else{
-        double breakpoint= chrom->calcBreakpoint(worldData->invRange, hetero);
-        chrom2 = chrom->recombine(breakpoint, newNode, other_ctx, worldData->invRange);	
+        const double bp1 = chrom->calcBreakpoint(worldData->invRange, hetero);
+        chrom2 = chrom->recombine(bp1, newNode, other_ctx, worldData->invRange);
         
     }
-    
+
     // add ARGnode to the vector of nodes
     if(!chrom2->isEmpty() && !chrom->isEmpty()) {
         worldData->argNodeVec.push_back(newNode);

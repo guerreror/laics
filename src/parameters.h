@@ -34,7 +34,6 @@
      std::vector<unsigned int> getSamplePerPop();
      std::vector<shared_ptr<Chromosome>> getChromVec();
      shared_ptr<ParameterData> getpData();
-     void setPhi();
      void setCarriers();
      void setSNPs();
      void setTimeStamp(double t);
@@ -49,10 +48,8 @@
      std::vector<double> speciation;
      std::vector<double> demography;
      unsigned int inv_age;
-     std::vector<double> phi_range;
      Segment invRange;
      Segment smcRange;
-     double phi;
      double theta;
      double BasesPerMorgan;
      bool kingman;
@@ -60,13 +57,15 @@
      bool msOutput;
      unsigned int n_SNPs;
      bool randSNP;
-     bool randPhi;
      bool fixedS;
      std::vector<double> snpRange;
      std::vector<double> snpPositions;
      std::vector<std::vector<int>> nCarriers;
      std::vector<shared_ptr<Chromosome>> initChr;
      std::vector<double> neut_site;
+     bool smcVerbose;
+     std::vector<double> targetSNPs;
+     double homoGcRate;
      double gcRate;
      double drRate;
      double tractSize;

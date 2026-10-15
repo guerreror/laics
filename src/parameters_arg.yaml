@@ -1,0 +1,21 @@
+Seed: "0"
+NumberOfReplicates: "10"
+KingmanCoal: "1"
+DriftSimulation: "0"
+MSOutput: "1"
+InversionFrequency: "0 0"
+InversionAge: "10000"
+BasesPerMorgan: "1e8"
+RandPhi: "0"
+Phi: "0.2"
+InversionRange: "0 100000"
+FixedSNPs: "1 2 1e-6"
+RandomSNPs: "1"
+SiteNodePositions: "0"
+RandomSample: "0"
+Samples:
+  pop0: "2 0"
+  pop1: "2 0"
+AncestorFrequencies:
+  root: 0.2
+SMC: "0"
