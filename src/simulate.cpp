@@ -30,9 +30,6 @@ using std::max;
 using std::min;
 
 
-#include <boost/math/special_functions/binomial.hpp>
-using boost::math::binomial_coefficient;
-
 // Includes from our files:
 #include "chromosome.h"
 #include "ran_mk.h"
@@ -100,9 +97,10 @@ unsigned short World::simulateGeneration(vector < vector <double> > & mig_prob){
             totalM += mRate[clustID];		//
             
             if(k > 1){
-                unsigned int a=2;
                 if(clustSize==0) {std::cerr<<"Error in SimulateGeneration(): Carriers in seemly empty context\n";}
-                double ka= binomial_coefficient<double>(k,a)/clustSize;
+                const unsigned long long pairs =
+                    (static_cast<unsigned long long>(k) * (k - 1)) / 2;
+                double ka = static_cast<double>(pairs) / clustSize;
                 cRate.push_back( ka );
                 totalC += ka;		//
             }

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import sys
+import os
 import yaml
 import demes
 import subprocess
@@ -7,10 +8,9 @@ import argparse
 import re
 import json
 from collections import defaultdict, deque
+from pathlib import Path
 
 # ---------- File paths ----------
-MIGRATION_JSON  = "src/migration_matrices.json"
-ORIGINAL_MIGRATION_JSON = "src/original_migration_matrices.json"
 EXECUTABLE_ARG  = "./executables/labp_v21"
 EXECUTABLE_SMC  = "./executables/labp_smc"
 
@@ -31,10 +31,20 @@ cli.add_argument(
     required=True,
     help="Demes YAML to load from SMC_input or ARG_input.",
 )
+cli.add_argument(
+    "--output-dir",
+    default=".",
+    help="Directory for generated migration matrices.",
+)
 cli_args = cli.parse_args()
 PARAMETERS_YAML = cli_args.config
 DEMES_YAML = cli_args.demes
 smc_flag = "1" if cli_args.mode == "smc" else "0"
+OUTPUT_DIR = Path(cli_args.output_dir).resolve()
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+MIGRATION_JSON = str(OUTPUT_DIR / "migration_matrices.json")
+ORIGINAL_MIGRATION_JSON = str(OUTPUT_DIR / "original_migration_matrices.json")
+RUN_DETAILS = str(OUTPUT_DIR / "run_details.txt")
 
 # ---------- Defaults ----------
 parameters = {
@@ -280,9 +290,6 @@ def write_migration_matrices_from_demes(graph, leaf_order, spec_events,
 
     with open(out_json, "w") as f:
         json.dump(payload, f, indent=4)
-
-    print(f"\n\nWrote {original_json} file with original demes-order matrices at times: {list(original_payload['matrices'].keys())}")
-    print(f"Wrote {out_json} file with active/remapped matrices at times: {list(payload.keys())}")
 
 # ---------- Speciation (sizes + events) ----------
 def build_speciation_from_demes(graph, ancestor_freqs=None, default_F=0.2):
@@ -563,10 +570,11 @@ if mig_rate is None:
 if mig_rate is not None:
     parameters["migRate"] = f"{mig_rate:g}"
 
-# ---------- Debug prints ----------
-print("\n\n--------Parsed speciation tree (past -> present)--------\n")
 ascii_tree = render_tree_ascii(graph, only_these_leaves=debug_info["leaf_order"])
-print(ascii_tree)
+with open(RUN_DETAILS, "w") as details:
+    details.write("--------Parsed speciation tree (past -> present)--------\n\n")
+    details.write(ascii_tree)
+    details.write("\n\n-------------------Given parameters:-------------------\n\n")
 
 # ---------- Validation helpers for sample arguments ----------
 def _count_pops_from_graph(graph) -> int:
@@ -642,18 +650,22 @@ if smc_flag == "1":
     ]
 
 try:
+    process_env = os.environ.copy()
+    process_env["LAICS_MIGRATION_JSON"] = MIGRATION_JSON
+    process_env["LAICS_RUN_DETAILS"] = RUN_DETAILS
     proc = subprocess.Popen(
         [EXECUTABLE] + args_list,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,
+        env=process_env,
     )
+    proc.stderr.reconfigure(newline="")
 except FileNotFoundError:
     print(f"\nERROR: Executable not found at {EXECUTABLE}", file=sys.stderr)
     sys.exit(1)
 
-print("\n\n-------------------Given parameters:-------------------\n")
 stderr_lines = []
 while True:
     ch = proc.stderr.read(1)

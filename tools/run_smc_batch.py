@@ -19,8 +19,6 @@ GENERATED_PATHS = [
     "smc_hop_trace.csv",
     "smc_hop_events.csv",
     "Output_log.txt",
-    "src/migration_matrices.json",
-    "src/original_migration_matrices.json",
 ]
 GRID_KEYS = ("GridSearch", "grid_search", "gridSearch")
 
@@ -46,10 +44,7 @@ def collect_outputs(result_dir: Path):
                 shutil.rmtree(dest)
             else:
                 dest.unlink()
-        if rel.startswith("src/"):
-            shutil.copy2(path, dest)
-        else:
-            shutil.move(str(path), str(dest))
+        shutil.move(str(path), str(dest))
 
 
 def load_yaml(path: Path):
@@ -209,7 +204,13 @@ def main():
                     flush=True,
                 )
                 remove_existing_outputs()
-                cmd = [sys.executable, str(PARAM_RUNNER), "--mode", "smc", "--config", str(tmp_params), "--demes", str(tmp_demes)]
+                cmd = [
+                    sys.executable, str(PARAM_RUNNER),
+                    "--mode", "smc",
+                    "--config", str(tmp_params),
+                    "--demes", str(tmp_demes),
+                    "--output-dir", str(result_dir),
+                ]
                 proc = subprocess.run(cmd, cwd=ROOT)
                 if proc.returncode != 0:
                     print(

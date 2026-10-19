@@ -9,22 +9,20 @@ InvLaBP simulates coalescent histories for sequences within a polymorphic chromo
 ## Quickstart
 
     # 1) Install deps (macOS/Homebrew)
-    brew install boost yaml-cpp python
+    brew install yaml-cpp python
     python -m pip install demes numpy pyyaml
 
     # 2) Add matching demes and parameter YAML files
     #    - SMC_input/ for SMC
     #    - ARG_input/ for ARG
-    #    param.py automatically writes src/migration_matrices.json from demes.yaml
+    #    param.py automatically writes migration_matrices.json into each result directory
 
     # 4) Build (from src/)
     g++ -std=c++14 -O3 \
-      -I /opt/homebrew/opt/boost/include \
       -I /opt/homebrew/opt/yaml-cpp/include \
-      -L /opt/homebrew/opt/boost/lib \
       -L /opt/homebrew/opt/yaml-cpp/lib \
       argnode.cpp chromosome.cpp poisevents.cpp simulate.cpp sitenode.cpp migprob.cpp world.cpp parameters.cpp main.cpp chromrecomb.cpp \
-      -lboost_random -lboost_system -lboost_math_c99 -lyaml-cpp \
+      -lyaml-cpp \
       -o labp_v19
 
     # 5) Place the executable inside the executables folder
@@ -54,14 +52,13 @@ InvLaBP simulates coalescent histories for sequences within a polymorphic chromo
 
 ### Libraries
 
-- Boost (headers + libs): `random`, `system`, `math_c99`
 - `yaml-cpp`
 - Python 3.9+
   - `demes`
   - `numpy`
   - `pyyaml`
 
-> Adjust include/lib paths if your Boost or yaml-cpp lives elsewhere.
+> Adjust include/lib paths if your yaml-cpp installation lives elsewhere.
 
 ---
 
@@ -81,7 +78,7 @@ Run (standard workflow):
 
 2. **Let `param.py` generate migration matrices**
 
-   `param.py` reads the selected demes file and writes `src/migration_matrices.json`.
+   `param.py` reads the selected demes file and writes `migration_matrices.json` into the run's output directory.
 
 3. **Run from the root folder**
 
