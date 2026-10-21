@@ -221,6 +221,12 @@ struct ActiveGeneFluxSet {
     }
 };
 
+enum class HorizontalBoundaryType_SMC {
+    Recombination,
+    GeneFluxEnd,
+    RegionEnd
+};
+
 static bool processGeneFluxBoundariesAtX(
     TreeNode*& activeTree,
     ActiveGeneFluxSet& geneFluxActive,
@@ -913,22 +919,24 @@ int main(int argc, const char *argv[])
             if (rawHopDelta <= 0.0) {
                 break;
             }
-            double hopDelta = rawHopDelta;
-            if (currentX + hopDelta > params.paramData->smcRange.R) {
-                hopDelta = params.paramData->smcRange.R - currentX;
+
+            double nextX = currentX + rawHopDelta;
+            HorizontalBoundaryType_SMC boundaryType =
+                HorizontalBoundaryType_SMC::Recombination;
+            if (nextX > params.paramData->smcRange.R) {
+                nextX = params.paramData->smcRange.R;
+                boundaryType = HorizontalBoundaryType_SMC::RegionEnd;
             }
-            if (hopDelta <= 0.0) {
-                break;
-            }
-            double nextX = currentX + hopDelta;
 
             double nextFluxEnd = 0.0;
             if (geneFluxActive.nextEnd(nextFluxEnd)) {
                 ++profActiveMinScans;
                 if (nextX >= nextFluxEnd) {
                     nextX = nextFluxEnd;
+                    boundaryType = HorizontalBoundaryType_SMC::GeneFluxEnd;
                 }
             }
+
             const double finalHopDelta = nextX - currentX;
             if (finalHopDelta <= 0.0) {
                 profAdd(profDelta, profT0);
