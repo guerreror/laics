@@ -10,6 +10,7 @@ struct TreeNode {
     Context context;
     TreeNode* parent = nullptr;
     std::vector<TreeNode*> children;
+    bool isGeneFluxMarker = false;
 };
 
 void freeTree(TreeNode* root);

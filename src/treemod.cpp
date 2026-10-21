@@ -58,6 +58,7 @@ static TreeNode* trimRetainedSiblingAfterCut(TreeNode* node,
                                              double cutTime,
                                              std::vector<unsigned long>* deletedIds) {
     while (node && node->children.size() == 1 && node->time > cutTime) {
+        if (node->isGeneFluxMarker) break;
         TreeNode* child = node->children.front();
         if (!(node->context == child->context)) break;
         node->children.clear();
@@ -175,6 +176,7 @@ bool cutEdgeRandomWithCleanupCollect(TreeNode*& root,
 
 void trimUnaryRootStem(TreeNode*& root) {
     while (root && root->children.size() == 1) {
+        if (root->isGeneFluxMarker) break;
         TreeNode* oldRoot = root;
         TreeNode* newRoot = root->children.front();
         oldRoot->children.clear();

@@ -163,6 +163,7 @@ static GeneFluxType_SMC pickGeneFluxType_SMC(
         return GeneFluxType_SMC::HeterokaryotypicGC;
     }
 
+    // Draw a uniform random number in [0, totalHeight) for arrangement changing flux events
     const double u = randreal(0.0, totalHeight);
     return (u < gcHeight)
         ? GeneFluxType_SMC::HeterokaryotypicGC
@@ -665,6 +666,7 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
                 Context newCtx = lineages[i]->context;
                 newCtx.inversion = (newCtx.inversion == 0 ? 1 : 0);
                 TreeNode* nr = addUnaryAbove(lineages[i], nextId++, event_time, newCtx);
+                if (nr) nr->isGeneFluxMarker = true;
                 if (nr && nr->parent == nullptr) lineages[i] = nr;
                 const GeneFluxType_SMC geneFluxType =
                     pickGeneFluxType_SMC(currentHopX, params);
@@ -870,6 +872,7 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
             newCtx.inversion = (newCtx.inversion == 0 ? 1 : 0);
             const unsigned long geneFluxNodeId = nextNodeId++;
             TreeNode* newRoot = addUnaryAbove(cutRoot, geneFluxNodeId, event_time, newCtx);
+            if (newRoot) newRoot->isGeneFluxMarker = true;
             if (newRoot->parent == nullptr) {
                 cutRoot = newRoot;
             }
