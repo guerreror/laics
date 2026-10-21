@@ -7,9 +7,16 @@
 #include "treemod.h"
 #include "parameters.h"
 
+enum class GeneFluxType_SMC {
+    HeterokaryotypicGC,
+    HomokaryotypicGC,
+    DoubleRecombination
+};
+
 struct GeneFluxEvent_SMC {
     double endX = -1.0;
     unsigned long nodeId = 0;
+    GeneFluxType_SMC type = GeneFluxType_SMC::HeterokaryotypicGC;
 };
 
 struct SMCStepOutcome {

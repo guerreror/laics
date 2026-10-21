@@ -153,14 +153,32 @@ static double triangleHeightAtX_SMC(double x, const Segment& range, double peakH
     return peakHeight * ((R - x) / (R - mid));
 }
 
-static std::string pickGeneFluxType_SMC(double x, const Parameters::ParameterData& params) {
+static GeneFluxType_SMC pickGeneFluxType_SMC(
+    double x,
+    const Parameters::ParameterData& params) {
     const double gcHeight = std::max(0.0, params.gcRate);
     const double drHeight = triangleHeightAtX_SMC(x, params.smcRange, std::max(0.0, params.drRate));
     const double totalHeight = gcHeight + drHeight;
-    if (totalHeight <= 0.0) return "GC";
+    if (totalHeight <= 0.0) {
+        return GeneFluxType_SMC::HeterokaryotypicGC;
+    }
 
     const double u = randreal(0.0, totalHeight);
-    return (u < gcHeight) ? "GC" : "DR";
+    return (u < gcHeight)
+        ? GeneFluxType_SMC::HeterokaryotypicGC
+        : GeneFluxType_SMC::DoubleRecombination;
+}
+
+static const char* geneFluxTypeLabel_SMC(GeneFluxType_SMC type) {
+    switch (type) {
+        case GeneFluxType_SMC::HeterokaryotypicGC:
+            return "GC";
+        case GeneFluxType_SMC::HomokaryotypicGC:
+            return "HomoGC";
+        case GeneFluxType_SMC::DoubleRecombination:
+            return "DR";
+    }
+    return "unknown";
 }
 
 static double drawDoubleRecombinationEnd_SMC(double startX, const Segment& range) {
@@ -173,13 +191,14 @@ static double drawDoubleRecombinationEnd_SMC(double startX, const Segment& range
 
 static GeneFluxEvent_SMC makeGeneFluxSegment_SMC(double startX,
                                                  unsigned long nodeId,
-                                                 const std::string& type,
+                                                 GeneFluxType_SMC type,
                                                  const Parameters::ParameterData& params) {
     GeneFluxEvent_SMC evt;
     const double boundedStart = std::max(params.smcRange.L, std::min(params.smcRange.R, startX));
     evt.nodeId = nodeId;
+    evt.type = type;
 
-    if (type == "DR") {
+    if (type == GeneFluxType_SMC::DoubleRecombination) {
         evt.endX = drawDoubleRecombinationEnd_SMC(boundedStart, params.smcRange);
     } else {
         const double J = std::max(0.0, params.tractSize);
@@ -647,7 +666,8 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
                 newCtx.inversion = (newCtx.inversion == 0 ? 1 : 0);
                 TreeNode* nr = addUnaryAbove(lineages[i], nextId++, event_time, newCtx);
                 if (nr && nr->parent == nullptr) lineages[i] = nr;
-                const std::string geneFluxType = pickGeneFluxType_SMC(currentHopX, params);
+                const GeneFluxType_SMC geneFluxType =
+                    pickGeneFluxType_SMC(currentHopX, params);
                 if (outcome) {
                     GeneFluxEvent_SMC evt = makeGeneFluxSegment_SMC(currentHopX,
                                                                     nr ? nr->id : 0,
@@ -656,7 +676,9 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
                     outcome->geneFluxEvents.push_back(evt);
                 }
                 recordEventRow_SMC(evlog, runIndex, hopIndex, currentHopX,
-                                   "gene_flux_fallback_" + geneFluxType, event_time);
+                                   std::string("gene_flux_fallback_") +
+                                       geneFluxTypeLabel_SMC(geneFluxType),
+                                   event_time);
                 handled = true;
                 break;
             }
@@ -853,7 +875,8 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
             }
             lineageTime = event_time;
 
-            const std::string geneFluxType = pickGeneFluxType_SMC(nextGeneFluxStartX, params);
+            const GeneFluxType_SMC geneFluxType =
+                pickGeneFluxType_SMC(nextGeneFluxStartX, params);
             GeneFluxEvent_SMC evt = makeGeneFluxSegment_SMC(nextGeneFluxStartX,
                                                             geneFluxNodeId,
                                                             geneFluxType,
@@ -863,7 +886,9 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
             }
             nextGeneFluxStartX = evt.endX;
             recordEventRow_SMC(evlog, runIndex, hopIndex, currentHopX,
-                               "gene_flux_" + geneFluxType, event_time);
+                               std::string("gene_flux_") +
+                                   geneFluxTypeLabel_SMC(geneFluxType),
+                               event_time);
         }
     }
 
