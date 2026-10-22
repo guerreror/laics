@@ -7,6 +7,7 @@ import subprocess
 import argparse
 import re
 import json
+import shutil
 from collections import defaultdict, deque
 from pathlib import Path
 
@@ -436,6 +437,22 @@ except Exception as e:
     print(f"Error loading {PARAMETERS_YAML}: {e}", file=sys.stderr)
     sys.exit(1)
 
+TREE_OUTPUT_DIR = None
+if smc_flag == "1":
+    tree_output_root = other_params.get(
+        "TreeOutputDirectory", other_params.get("tree_output_directory", "")
+    )
+    tree_output_root = os.path.expandvars(str(tree_output_root or "")).strip()
+    if tree_output_root:
+        TREE_OUTPUT_DIR = Path(tree_output_root).expanduser().resolve() / OUTPUT_DIR.name / "smc_trees"
+    else:
+        TREE_OUTPUT_DIR = OUTPUT_DIR / "smc_trees"
+    if TREE_OUTPUT_DIR.is_symlink():
+        TREE_OUTPUT_DIR.unlink()
+    elif TREE_OUTPUT_DIR.exists():
+        shutil.rmtree(TREE_OUTPUT_DIR)
+    TREE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
 # Copy keys from parameter YAML
 for key, val in (other_params or {}).items():
     key = YAML_KEY_ALIASES.get(str(key), str(key))
@@ -575,6 +592,8 @@ with open(RUN_DETAILS, "w") as details:
     details.write("--------Parsed speciation tree (past -> present)--------\n\n")
     details.write(ascii_tree)
     details.write("\n\n-------------------Given parameters:-------------------\n\n")
+    if TREE_OUTPUT_DIR:
+        details.write(f"Tree output directory: {TREE_OUTPUT_DIR}\n\n")
 
 # ---------- Validation helpers for sample arguments ----------
 def _count_pops_from_graph(graph) -> int:
@@ -653,6 +672,8 @@ try:
     process_env = os.environ.copy()
     process_env["LAICS_MIGRATION_JSON"] = MIGRATION_JSON
     process_env["LAICS_RUN_DETAILS"] = RUN_DETAILS
+    if TREE_OUTPUT_DIR:
+        process_env["LAICS_TREE_OUTPUT_DIR"] = str(TREE_OUTPUT_DIR)
     proc = subprocess.Popen(
         [EXECUTABLE] + args_list,
         stdout=subprocess.PIPE,

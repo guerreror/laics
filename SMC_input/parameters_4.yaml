@@ -23,4 +23,5 @@ HopInformation: "0"
 GeneConversionRate: "0.000001"
 DoubleRecombinationRate: "0.0000001"
 TractSize: "200"
+TreeOutputDirectory: ""
 

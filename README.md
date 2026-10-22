@@ -82,6 +82,10 @@ Run (standard workflow):
 
 3. **Run from the root folder**
 
+   Set `TreeOutputDirectory` in an SMC parameter YAML to an optional scratch or
+   output location. Trees are written to `<TreeOutputDirectory>/<run-name>/smc_trees`;
+   an empty value keeps them in the normal batch result directory.
+
        make run-smc
 
    Or use:

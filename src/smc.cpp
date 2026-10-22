@@ -708,6 +708,9 @@ int main(int argc, const char *argv[])
     }
     TskitCStore treeSequences;
     const size_t treeBatchBytes = size_t{512} * 1024 * 1024;
+    const char* treeOutputPath = std::getenv("LAICS_TREE_OUTPUT_DIR");
+    const std::string treeOutputDir =
+        treeOutputPath && *treeOutputPath ? treeOutputPath : "smc_trees";
 
     for (int timer = 0; timer < (int)nRuns; ++timer)
     {
@@ -954,7 +957,7 @@ int main(int argc, const char *argv[])
 
         if (treeSequences.storedBytes() >= treeBatchBytes || timer + 1 == static_cast<int>(nRuns)) {
             const auto writeStart = ProfileClock::now();
-            treeSequences.write("smc_trees");
+            treeSequences.write(treeOutputDir);
             const double seconds = elapsedSec(writeStart, ProfileClock::now());
             if (smcProfile) profTskWrite += seconds;
             treeSequences.clear();
