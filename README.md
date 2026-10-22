@@ -9,38 +9,36 @@ InvLaBP simulates coalescent histories for sequences within a polymorphic chromo
 ## Quickstart
 
     # 1) Install deps (macOS/Homebrew)
-    brew install boost yaml-cpp python
+    brew install yaml-cpp python
     python -m pip install demes numpy pyyaml
 
-    # 2) Generate migration matrices from your demes graph
-    python src/mig_matrix_demes.py  # Outputs the migration_matrices.json file
-
-    # 3) Edit simulation parameters
-    #    - parameters.yaml (points to migration_matrices.json and sets all sim knobs)
+    # 2) Add matching demes and parameter YAML files
+    #    - SMC_input/ for SMC
+    #    - ARG_input/ for ARG
+    #    param.py automatically writes migration_matrices.json into each result directory
 
     # 4) Build (from src/)
     g++ -std=c++14 -O3 \
-      -I /opt/homebrew/opt/boost/include \
       -I /opt/homebrew/opt/yaml-cpp/include \
-      -L /opt/homebrew/opt/boost/lib \
       -L /opt/homebrew/opt/yaml-cpp/lib \
       argnode.cpp chromosome.cpp poisevents.cpp simulate.cpp sitenode.cpp migprob.cpp world.cpp parameters.cpp main.cpp chromrecomb.cpp \
-      -lboost_random -lboost_system -lboost_math_c99 -lyaml-cpp \
+      -lyaml-cpp \
       -o labp_v19
 
     # 5) Place the executable inside the executables folder
 
     # 6) Run (from repo root)
-    python src/param.py
+    make run-smc  # SMC
+    make run-arg  # ARG
 
 ---
 
 ## Newly Added Features
 
-- YAML-driven configuration (`parameters.yaml`)
+- Separate YAML input directories (`SMC_input/`, `ARG_input/`)
 - Demes-aware, time-varying migration via `demes.yaml` → `migration_matrices.json`
 - Multiple speciation merges and demography changes on explicit schedules
-- Python launcher (`src/param.py`) that parses configs, prints summaries, and can emit ms-style data
+- Python launcher (`src/param.py`) that parses configs and prints summaries
 
 ---
 
@@ -54,14 +52,13 @@ InvLaBP simulates coalescent histories for sequences within a polymorphic chromo
 
 ### Libraries
 
-- Boost (headers + libs): `random`, `system`, `math_c99`
 - `yaml-cpp`
 - Python 3.9+
   - `demes`
   - `numpy`
   - `pyyaml`
 
-> Adjust include/lib paths if your Boost or yaml-cpp lives elsewhere.
+> Adjust include/lib paths if your yaml-cpp installation lives elsewhere.
 
 ---
 
@@ -76,77 +73,91 @@ InvLaBP simulates coalescent histories for sequences within a polymorphic chromo
 
 Run (standard workflow):
 
-1. **Edit `demes.yaml`**  
-   Define populations, sizes, epochs, and migrations.
+1. **Add YAML inputs**
+   Put matching `demes_*.yaml` and `parameters_*.yaml` pairs in `SMC_input/`. ARG uses `ARG_input/demes_arg.yaml` and `ARG_input/parameters_arg.yaml`.
 
-2. **Generate migration matrices using the provided `demes.yaml` file**
+2. **Let `param.py` generate migration matrices**
 
-       python src/mig_matrix_demes.py
+   `param.py` reads the selected demes file and writes `migration_matrices.json` into the run's output directory.
 
-   This produces a time-stamped `migration_matrices.json` which is used by the simulation software.
+3. **Run from the root folder**
 
-3. **Edit `parameters.yaml` accordingly**  
-   Make sure it points to `migration_matrices.json` and sets all simulation parameters.
+   Set `TreeOutputDirectory` in an SMC parameter YAML to an optional scratch or
+   output location. Trees are written to `<TreeOutputDirectory>/<run-name>/smc_trees`;
+   an empty value keeps them in the normal batch result directory.
 
-4. **Run the Python launcher from the root folder**
+       make run-smc
 
-       python src/param.py
+   Or use:
+
+       make run-arg
 
 ---
 
-## Configuration (Key Fields in `parameters.yaml` File)
+## Configuration
 
-All knobs live in `parameters.yaml`. Names map directly to internal parameters.
+SMC configurations live in `SMC_input/`; ARG configuration lives in `ARG_input/`.
 
-- `seed`: RNG seed (`0` = random; the effective seed is printed)
-- `nruns`: number of replicates of the simulation
+- `Seed`: RNG seed (`0` = random; the effective seed is printed)
+- `NumberOfReplicates`: number of simulation replicates
 
-- `kingman_coal`:
+- `KingmanCoal`:
   - `1` = event-driven Kingman approximation
   - `0` = generation-by-generation
 
-- `drift_sim`:
+- `DriftSimulation`:
   - (Drift simulation mode; see code / `param.py` for details)
 
-- `msOutput`:  
-  `1` to emit `outLABP*.sites` and `outLABP*.stats`
-
-- `inv_freq`:  
+- `InversionFrequency`:  
   Initial inversion frequency per population
 
-- `inv_age`:  
+- `InversionAge`:  
   If `> 0`, step the inversion to loss outside origin context at that time
 
 - `BasesPerMorgan`:
   - Bases per Morgan (scaling from physical bp to recombination units)
 
-- `randPhi`:
-  - `1` to sample `log10(phi)` uniformly in `phi_range = [min, max]`
-  - `0` to use fixed `phi`
+- `RandPhi` and `Phi`:
+  Legacy ARG fields retained only for command-line compatibility. Gene flux now
+  uses the separate gene-conversion and double-recombination rates below.
 
-- `phi`:  
-  Fixed gene-flux when `randPhi = 0`
-
-- `invRange`:  
+- `InversionRange`:  
   Inversion span in bp (scaled internally)
 
   ```yaml
-  invRange: [L_bp, R_bp]
-- `fixedS`:
-  `fixedS = 1` → exactly `n_SNPs` markers
+  InversionRange: "L_bp R_bp"
+  ```
 
-- `n_SNPs`: 
-  Number of site node positions.
+- `FixedSNPs`:
+  ARG only. `FixedSNPs = 1 ...` means exactly fixed marker count.
 
-- `randSNP`:
-  `1` → uniform placement in `[snpPositions[0], snpPositions[-1]]`
+- `RandomSNPs`:
+  ARG only. `1` means random marker placement.
 
-- `snpPositions`:  
+- `SiteNodePositions`:  
   Site positions in bp.
 
-- `randomSample`: 
-  `1` → one per-pop total sample; carriers drawn binomially by `inv_freq`  
+- `RandomSample`: 
+  `1` → one per-pop total sample; carriers drawn binomially by `InversionFrequency`  
   `0` → one pair per pop: `<standard> <inverted>` (exact)
 
-- `nCarriers / tempRead`: 
-  As printed by the summary from `src/param.py`.
+- `Samples`: 
+  Per-pop sample definitions.
+
+  ```yaml
+  Samples:
+    pop0: "2 0"
+    pop1: "2 0"
+  ```
+
+- `HeterokaryotypicGeneConversionRate` (or `GeneConversionRate`):
+  Heterokaryotypic gene-conversion rate.
+
+- `HomokaryotypicGeneConversionRate`:
+  Homokaryotypic gene-conversion rate.
+
+- `DoubleRecombinationRate`:
+  Double-recombination rate.
+
+- `TractSize`:
+  Gene-conversion tract length in bases.

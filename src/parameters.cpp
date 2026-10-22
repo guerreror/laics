@@ -149,31 +149,23 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
     paramData->BasesPerMorgan = std::stod(param_vec[10]);
     std::cerr << "Bases per Morgan in homokaryotypic recombination " << paramData->BasesPerMorgan << '\n';
 
-    // Random phi flag (param_vec[11])
-    paramData->randPhi = (param_vec[11] == "1");
-    std::cerr << "Random phi values? " << paramData->randPhi << '\n';
-
-    // Phi range (param_vec[12])
-    iss.clear();
-    iss.str(param_vec[12]);
-    paramData->phi_range = vector<double>(std::istream_iterator<double>(iss), std::istream_iterator<double>());
-    if (paramData->randPhi)
-    {
-        std::cerr << "Random gene flux (phi) range = " << paramData->phi_range[0] << " - " << paramData->phi_range[1] << '\n';
-    }
-    else
-    {
-        std::cerr << "Gene flux (phi) = " << paramData->phi_range[0] << '\n';
-    }
+    // param_vec[11] and param_vec[12] retain the legacy phi slots so older
+    // command lines keep their positional layout. ARG gene flux now uses the
+    // separate GeneConversionRate and DoubleRecombinationRate parameters.
+    std::cerr << "Legacy phi arguments ignored; using separate GC and DR rates.\n";
 
     // Inversion range (param_vec[13])
     vector<double> invtemp;
     iss.clear();
     iss.str(param_vec[13]);
     invtemp = vector<double>(std::istream_iterator<double>(iss), std::istream_iterator<double>());
+    paramData->smcRange.L = invtemp[0];
+    paramData->smcRange.R = invtemp[1];
     paramData->invRange.L = invtemp[0] / paramData->BasesPerMorgan;
     paramData->invRange.R = invtemp[1] / paramData->BasesPerMorgan;
-    std::cerr << "Inversion from: " << invtemp[0] << " to " << invtemp[1] << " (" << paramData->invRange.L << " - " << paramData->invRange.R << " recUnits)\n";
+    std::cerr << "Inversion from: " << invtemp[0] << " to " << invtemp[1]
+              << " raw SMC units (" << paramData->invRange.L << " - "
+              << paramData->invRange.R << " ARG recUnits)\n";
 
     // Fixed S and Theta (param_vec[14])
     vector<double> stemp;
@@ -240,26 +232,25 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
     if (randomSample)
     {
         // ---- RANDOM == 1 ----
-        // Expect exactly ONE string (param_vec[18]) named "tempRead" with <pops> integers.
         if (param_vec.size() <= base) {
-            std::cerr << "Error: randomSample==1 requires one 'tempRead' string at param_vec[18] "
+            std::cerr << "Error: randomSample==1 requires one sample-count string at param_vec[18] "
                     << "with " << pops << " integers (one per population).\n";
             exit(1);
         }
 
         std::istringstream iss_local(param_vec[base]);
-        std::vector<int> tempRead((std::istream_iterator<int>(iss_local)),
-                                std::istream_iterator<int>());
+        std::vector<int> sampleSizes((std::istream_iterator<int>(iss_local)),
+                                     std::istream_iterator<int>());
 
-        if (tempRead.size() != pops) {
-            std::cerr << "Inconsistent number of sample sizes in tempRead: got "
-                    << tempRead.size() << ", expected " << pops << " (one per population).\n";
+        if (sampleSizes.size() != pops) {
+            std::cerr << "Inconsistent number of random sample sizes: got "
+                    << sampleSizes.size() << ", expected " << pops << " (one per population).\n";
             exit(1);
         }
 
         for (unsigned int p = 0; p < pops; ++p) {
-            int invcount = randbinom(tempRead[p], paramData->initialFreqs.at(p));
-            paramData->nCarriers.at(p).push_back(tempRead[p] - invcount); // standard
+            int invcount = randbinom(sampleSizes[p], paramData->initialFreqs.at(p));
+            paramData->nCarriers.at(p).push_back(sampleSizes[p] - invcount); // standard
             paramData->nCarriers.at(p).push_back(invcount);               // inverted
         }
     }
@@ -267,13 +258,12 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
     {
         // ---- RANDOM == 0 ----
         // Expect EXACTLY <pops> per-pop strings starting at param_vec[18].
-        // The FIRST one can be named "tempRead" and is simply used as Pop 0's pair.
         // Each string must contain exactly TWO integers: "<standard> <inverted>".
         if (param_vec.size() < base + pops) {
             std::size_t provided = (param_vec.size() > base) ? (param_vec.size() - base) : 0;
             std::cerr << "Error: randomSample==0 requires " << pops
                     << " per-pop sample strings starting at param_vec[18] "
-                    << "(the first may be 'tempRead'), but only " << provided
+                    << "but only " << provided
                     << " provided.\n";
             exit(1);
         }
@@ -281,7 +271,7 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
         int totalSample = 0;
 
         for (unsigned int p = 0; p < pops; ++p) {
-            std::cerr << "Sample in Pop " << p << ": ";
+            std::cerr << "Sample in pop" << p << ": ";
 
             std::istringstream iss_local(param_vec[base + p]);
             std::vector<int> pairVals((std::istream_iterator<int>(iss_local)),
@@ -307,6 +297,37 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
 
 
 
+    const std::size_t outputBase = base + (randomSample ? 1 : pops);
+    paramData->gcRate = 0.0;
+    if (param_vec.size() > outputBase) {
+        paramData->gcRate = std::stod(param_vec[outputBase]);
+    }
+
+    paramData->drRate = 0.0;
+    if (param_vec.size() > outputBase + 1) {
+        paramData->drRate = std::stod(param_vec[outputBase + 1]);
+    }
+
+    paramData->tractSize = 200.0;
+    if (param_vec.size() > outputBase + 2) {
+        paramData->tractSize = std::stod(param_vec[outputBase + 2]);
+    }
+
+    paramData->homoGcRate = 0.0;
+    if (param_vec.size() > outputBase + 3) {
+        paramData->homoGcRate = std::stod(param_vec[outputBase + 3]);
+    }
+
+    paramData->hopInformation = false;
+    if (param_vec.size() > outputBase + 4) {
+        paramData->hopInformation = (param_vec[outputBase + 4] == "1");
+    }
+
+    std::cerr << "Heterokaryotypic Gene Conversion Rate: " << paramData->gcRate << '\n';
+    std::cerr << "Homokaryotypic Gene Conversion Rate: " << paramData->homoGcRate << '\n';
+    std::cerr << "Double Recombination Rate: " << paramData->drRate << '\n';
+    std::cerr << "Tract Size: " << paramData->tractSize << '\n';
+    std::cerr << "Hop information: " << paramData->hopInformation << '\n';
 }
 
 Parameters::~Parameters(){
@@ -363,19 +384,6 @@ void Parameters::setCarriers()
                 paramData->initChr.push_back(chr);
             }
         }
-    }
-}
-
-void Parameters::setPhi()
-{
-    if (paramData->randPhi)
-    {
-        double phiExponent = randreal(paramData->phi_range[0], paramData->phi_range[1]);
-        paramData->phi = pow(10, phiExponent);
-    }
-    else
-    {
-        paramData->phi = paramData->phi_range[0];
     }
 }
 

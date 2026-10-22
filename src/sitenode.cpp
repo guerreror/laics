@@ -268,6 +268,50 @@
      gatherAllNodes(nodes);
      printAllNodesSorted(nodes, filename);
  }
+
+ //---------------------------------------------------------------------
+ // Write the gene tree in Graphviz DOT format.
+ void SiteNode::writeDOT(const std::string &filename)
+ {
+     std::vector<SiteNode*> nodes;
+     gatherAllNodes(nodes);
+
+     std::ofstream outFile(filename.c_str());
+     if (!outFile.is_open()) {
+         std::cerr << "Error: Could not open file " << filename << " for writing.\n";
+         return;
+     }
+
+     outFile << "digraph SiteTree {\n";
+     outFile << "  node [shape=circle];\n";
+
+     for (auto *node : nodes) {
+         if (!node) continue;
+         if (node->getNodeNumber() == std::numeric_limits<unsigned long>::max() || node->getTime() < 0)
+             continue;
+         outFile << "  node" << node->getNodeNumber()
+                 << " [label=\"" << node->getNodeNumber() << "\"];\n";
+     }
+
+     for (auto *node : nodes) {
+         if (!node) continue;
+         if (node->getNodeNumber() == std::numeric_limits<unsigned long>::max() || node->getTime() < 0)
+             continue;
+         for (size_t i = 0; i < node->descendant.size(); ++i) {
+             const auto &child = node->descendant[i];
+             if (!child) continue;
+             if (child->getNodeNumber() == std::numeric_limits<unsigned long>::max() || child->getTime() < 0)
+                 continue;
+             const char *edge_color = (child->context.inversion == 1) ? "lightskyblue" : "black";
+             outFile << "  node" << node->getNodeNumber()
+                     << " -> node" << child->getNodeNumber()
+                     << " [color=\"" << edge_color << "\"];\n";
+         }
+     }
+
+     outFile << "}\n";
+     outFile.close();
+ }
   
  //---------------------------------------------------------------------
  // Additional functions required by snptree.h:
@@ -284,15 +328,71 @@
  }
   
  // Returns the total informative length (using branchL_Informative) recursively.
- double SiteNode::getTotalLength_Informative(double runtot)
- {
-     double runTotal = runtot;
-     for (size_t i = 0; i < descendant.size(); i++) {
-         runTotal += descendant[i]->branchL_Informative;
-         runTotal = descendant[i]->getTotalLength_Informative(runTotal);
-     }
-     return runTotal;
- }
+double SiteNode::getTotalLength_Informative(double runtot)
+{
+    double runTotal = runtot;
+    for (size_t i = 0; i < descendant.size(); i++) {
+        runTotal += descendant[i]->branchL_Informative;
+        runTotal = descendant[i]->getTotalLength_Informative(runTotal);
+    }
+    return runTotal;
+}
+
+// Recursively sum branch lengths by inversion state of the descendant node.
+void SiteNode::getTotalLengthByInversion(double &standard_len, double &inverted_len)
+{
+    for (size_t i = 0; i < descendant.size(); i++) {
+        const auto &child = descendant[i];
+        if (!child)
+            continue;
+        if (child->context.inversion == 1)
+            inverted_len += child->branchL;
+        else
+            standard_len += child->branchL;
+        child->getTotalLengthByInversion(standard_len, inverted_len);
+    }
+}
+
+static void collectEdgeWeightsByInversion(
+    SiteNode *node,
+    const vector<unsigned int> &pop_sizes,
+    const vector<double> &inv_freqs,
+    double r,
+    vector<EdgeWeight> &standard_edges,
+    vector<EdgeWeight> &inverted_edges)
+{
+    for (size_t i = 0; i < node->descendant.size(); i++) {
+        const auto &child = node->descendant[i];
+        if (!child)
+            continue;
+        unsigned int pop = child->context.pop;
+        if (pop >= pop_sizes.size() || pop >= inv_freqs.size())
+            continue;
+
+        double popN = pop_sizes[pop];
+        double pI = inv_freqs[pop];
+        double base = 4.0 * r * popN * child->branchL;
+
+        if (child->context.inversion == 1) {
+            inverted_edges.push_back({node->nodeNumber, child->nodeNumber, base * pI});
+        } else {
+            standard_edges.push_back({node->nodeNumber, child->nodeNumber, base * (1.0 - pI)});
+        }
+
+        collectEdgeWeightsByInversion(child.get(), pop_sizes, inv_freqs, r,
+                                      standard_edges, inverted_edges);
+    }
+}
+
+void SiteNode::getEdgeWeightsByInversion(const vector<unsigned int> &pop_sizes,
+                                         const vector<double> &inv_freqs,
+                                         double r,
+                                         vector<EdgeWeight> &standard_edges,
+                                         vector<EdgeWeight> &inverted_edges)
+{
+    collectEdgeWeightsByInversion(this, pop_sizes, inv_freqs, r,
+                                  standard_edges, inverted_edges);
+}
   
  // Recursively finds a node where the running total branch length exceeds the target.
  snpHit SiteNode::getSNPhit(double target, snpHit x)

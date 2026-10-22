@@ -1,0 +1,109 @@
+#include "smc_helpers.h"
+
+#include <vector>
+#include <algorithm>
+
+const SMCActiveState& activeStateAtTime_SMC(const Parameters::ParameterData& params, double t) {
+    struct Event { double time; int type; size_t index; };
+    static const Parameters::ParameterData* cachedParams = nullptr;
+    static std::vector<double> times;
+    static std::vector<SMCActiveState> states;
+
+    if (cachedParams != &params) {
+        cachedParams = &params;
+        times.clear();
+        states.clear();
+
+        std::vector<Event> events;
+    const size_t nPops = params.popSizeVec.size();
+    events.reserve(params.demography.size() + params.speciation.size() + 1);
+
+    if (!params.demography.empty() && params.demography[0] == 1) {
+        const size_t stride = 1 + nPops;
+        for (size_t i = 1; i + nPops < params.demography.size(); i += stride) {
+            events.push_back({params.demography[i], 2, i});
+        }
+    }
+    if (!params.speciation.empty() && params.speciation[0] == 1) {
+        for (size_t i = 1; i + 4 < params.speciation.size(); i += 5) {
+            events.push_back({params.speciation[i + 2], 1, i});
+        }
+    }
+    if (params.inv_age > 0) {
+        events.push_back({static_cast<double>(params.inv_age), 0, 0});
+    }
+
+    std::sort(events.begin(), events.end(), [](const Event& a, const Event& b) {
+        if (a.time != b.time) return a.time < b.time;
+        return a.type > b.type; // demography before speciation at the same time.
+    });
+
+    SMCActiveState state{params.popSizeVec, params.initialFreqs};
+        times.push_back(-1.0);
+        states.push_back(state);
+    for (const auto& ev : events) {
+        if (ev.type == 2) {
+            for (size_t k = 0; k < state.popSizes.size() && ev.index + 1 + k < params.demography.size(); ++k) {
+                const double size = params.demography[ev.index + 1 + k];
+                if (size != 0) state.popSizes[k] = static_cast<unsigned int>(size);
+            }
+        } else if (ev.type == 1) {
+            const unsigned int A = static_cast<unsigned int>(params.speciation[ev.index]);
+            const unsigned int B = static_cast<unsigned int>(params.speciation[ev.index + 1]);
+            if (A < state.popSizes.size() && B < state.popSizes.size()) {
+                state.popSizes[A] = static_cast<unsigned int>(params.speciation[ev.index + 4]);
+                state.invFreqs[A] = params.speciation[ev.index + 3];
+                state.popSizes.erase(state.popSizes.begin() + static_cast<long>(B));
+                state.invFreqs.erase(state.invFreqs.begin() + static_cast<long>(B));
+            }
+        } else {
+            std::fill(state.invFreqs.begin(), state.invFreqs.end(), 0.0);
+        }
+            times.push_back(ev.time);
+            states.push_back(state);
+    }
+    }
+
+    const double query = t + 1e-9;
+    const auto it = std::upper_bound(times.begin(), times.end(), query);
+    const size_t idx = (it == times.begin()) ? 0 : static_cast<size_t>((it - times.begin()) - 1);
+    return states[idx];
+}
+
+static bool segmentCarriesSite(double x, const std::vector<Segment>& segments) {
+    for (const auto& s : segments) {
+        if ((s.L < x && x < s.R) || s.L == x) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static TreeNode* buildX0TreeRec(double x0, const std::shared_ptr<ARGNode>& argNode, TreeNode* parent) {
+    if (!argNode || argNode->getTime() < 0) return nullptr;
+
+    TreeNode* node = new TreeNode();
+    node->id = argNode->getNodeNumber();
+    node->time = argNode->getTime();
+    node->context = argNode->getContext();
+    node->parent = parent;
+
+    const unsigned long nDesc = argNode->getNDescendants();
+    for (unsigned long i = 0; i < nDesc; ++i) {
+        const std::vector<Segment> segments = argNode->getDescendantSegmentVector(i);
+        if (!segmentCarriesSite(x0, segments)) {
+            continue;
+        }
+
+        TreeNode* child = buildX0TreeRec(x0, argNode->getDescendantNode(i), node);
+        if (child) {
+            node->children.push_back(child);
+        }
+    }
+
+    return node;
+}
+
+TreeNode* buildX0TreeFromARGPreserveUnary(double x0, std::shared_ptr<ARGNode> argRoot) {
+    return buildX0TreeRec(x0, argRoot, nullptr);
+}

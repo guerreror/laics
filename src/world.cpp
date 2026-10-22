@@ -13,6 +13,7 @@
 
 //#define DEBUGGER
 // Includes from STL:
+	#include <cassert>
 	#include <iostream>
 		using std::cout;
 		using std::endl;
@@ -85,9 +86,13 @@ World::World(shared_ptr<Parameters::ParameterData> p){
     worldData->kingman=p->kingman;
 	worldData->popSize=p->popSizeVec;
 	worldData->drift=p->drift;
-    worldData->snpSites = p->neut_site;
+	worldData->snpSites = p->neut_site;
 	worldData->invRange = p->invRange;
-	worldData->phi=p->phi;
+	worldData->drRate=p->drRate;
+	worldData->homoGcRate=p->homoGcRate;
+	worldData->gcRate=p->gcRate;
+	worldData->basesPerMorgan=p->BasesPerMorgan;
+	worldData->tractSize=p->tractSize;
 	worldData->freq=p->initialFreqs;
 
     worldData->freq.resize(nClust);
@@ -119,29 +124,19 @@ World::World(shared_ptr<Parameters::ParameterData> p){
     }
 
 	if (!p->speciation.empty() && p->speciation.at(0) == 1) {
-		// Prefer new stride = 5 (A,B,T,F,R). If only 4 fields remain, treat like legacy (A,B,T,F) with no R.
+		if ((p->speciation.size() - 1) % 5 != 0) {
+			std::cerr << "Error: speciation events must use demes-derived format (A B T F R).\n";
+			exit(1);
+		}
 		size_t i = 1;
 		while (i < p->speciation.size()) {
-			if (i + 4 < p->speciation.size()) {
-				// New format with R
-				unsigned int A = (unsigned int)p->speciation[i];
-				unsigned int B = (unsigned int)p->speciation[i+1];
-				double       T =               p->speciation[i+2];
-				double       F =               p->speciation[i+3];
-				unsigned int R = (unsigned int)p->speciation[i+4];
-				events.push_back({ T, 1, F, { A, B, R } });
-				i += 5;
-			} else if (i + 3 < p->speciation.size()) {
-				// Legacy format (no R)
-				unsigned int A = (unsigned int)p->speciation[i];
-				unsigned int B = (unsigned int)p->speciation[i+1];
-				double       T =               p->speciation[i+2];
-				double       F =               p->speciation[i+3];
-				events.push_back({ T, 1, F, { A, B } });
-				i += 4;
-			} else {
-				break; 
-			}
+			unsigned int A = (unsigned int)p->speciation[i];
+			unsigned int B = (unsigned int)p->speciation[i+1];
+			double       T =               p->speciation[i+2];
+			double       F =               p->speciation[i+3];
+			unsigned int R = (unsigned int)p->speciation[i+4];
+			events.push_back({ T, 1, F, { A, B, R } });
+			i += 5;
 		}
 	}
 
@@ -200,19 +195,20 @@ World::World(shared_ptr<Parameters::ParameterData> p){
     
     worldData->generation=1.0;
 
-	// debug: what epochs do we have?
-	// std::cerr << ">>> Epoch breaks: ";
-	// for (double t : worldData->epoch_breaks) std::cerr << t << " ";
-	// std::cerr << "\n>>> Epoch types:  ";
-	// for (unsigned ty : worldData->epochType)   std::cerr << ty << " ";
-	// std::cerr << "\n";
-
-} // End constructor for World
+	} // End constructor for World
 
 
 
 World::~World(){
 	DBG("Population:: Destructing...")
+}
+
+void World::recordContextFlip(shared_ptr<Chromosome> chrom){
+	if (!chrom || chrom->isEmpty()) return;
+	shared_ptr<ARGNode> newNode;
+	newNode.reset(new ARGNode(worldData->argNodeVec.size(), chrom, worldData->generation));
+	worldData->argNodeVec.push_back(newNode);
+	chrom->setDescendant(newNode);
 }
 
 

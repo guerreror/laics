@@ -21,9 +21,6 @@ using std::make_pair;
 #include <algorithm>
 using std::count;
 
-#include <boost/math/special_functions/binomial.hpp>
-using boost::math::binomial_coefficient;
-
 // Includes from our files:
 #include "chromosome.h"
 #include "ran_mk.h"
@@ -118,7 +115,13 @@ unsigned short World::coalescePoisson (){
 				int ranParent = randint(0, nLocalChromos-1);
 				if( ranParent < coalescers.size()){			//coalescence happened
 					totalEvents++;
-					shared_ptr<Chromosome> receiver = coalescers.at(ranParent);
+                    shared_ptr<Chromosome> receiver = coalescers.at(ranParent);
+                    if (!(receiver->getContext() == who->getContext())) {
+                        std::cerr << "Error: attempted coalescence of different contexts in coalescePoisson. "
+                                  << "ctx1(pop=" << receiver->getContext().pop << ",inv=" << receiver->getContext().inversion << ") "
+                                  << "ctx2(pop=" << who->getContext().pop << ",inv=" << who->getContext().inversion << ")\n";
+                        continue;
+                    }
 					
 					// Make a new ARG node: 
 					//
@@ -151,6 +154,9 @@ unsigned short World::recombine_all(){
     //  Modified into recombine_all() by RG (III-16), does gene flux, heterokaryotypic, and homokaryotipic events.
     
 	int events=0;
+	const double inversionLengthBp =
+		(worldData->invRange.R - worldData->invRange.L) *
+		worldData->basesPerMorgan;
 	
 	vector< shared_ptr < Chromosome> > recombinants;
 	
@@ -163,27 +169,39 @@ unsigned short World::recombine_all(){
             double  freqI = getFreqI(i->first.pop);
             if (i->first.inversion==0) freqI= 1- freqI;
 
-			double gfRate = (1-freqI)* worldData->phi;
+			const double oppositeFrequency = 1.0 - freqI;
+			double drRate = oppositeFrequency * worldData->drRate;
+			double homoGcRate =
+				freqI * worldData->homoGcRate * inversionLengthBp;
+			double heteroGcRate =
+				oppositeFrequency * worldData->gcRate * inversionLengthBp;
             double hetRate = (1- freqI)* chrom->getHeteroLength(worldData->invRange);
             double homRate = freqI * chrom->getHomoLength(worldData->invRange);
 	
             double x = randreal(0, 1);
 			
-			if (x < (gfRate + hetRate + homRate)){
+			if (x < (drRate + homoGcRate + heteroGcRate + hetRate + homRate)){
 				events++;
 				
-                bool gflux= false;
-                bool hetero = false;
-                
-                if(x < gfRate) {
-                    gflux = true;
+                RecombinationType type;
+                if (x < homoGcRate) {
+                    type = RecombinationType::HomokaryotypicGeneConversion;
                 }
-                else if(x < gfRate+hetRate){
-                    hetero=true;
+                else if (x < homoGcRate + heteroGcRate) {
+                    type = RecombinationType::HeterokaryotypicGeneConversion;
+                }
+                else if (x < homoGcRate + heteroGcRate + drRate) {
+                    type = RecombinationType::DoubleRecombination;
+                }
+                else if (x < homoGcRate + heteroGcRate + drRate + hetRate) {
+                    type = RecombinationType::Heterokaryotypic;
+                }
+                else {
+                    type = RecombinationType::Homokaryotypic;
                 }
                 
 				// creat new chromosome
-				shared_ptr<Chromosome> chrom2 = recomb_Wrap(chrom, hetero, gflux);
+				shared_ptr<Chromosome> chrom2 = recomb_Wrap(chrom, type);
 				
 				CDBG("After recomb, chr has "<<chrom->get_All_SegVec().size()<<" segs, and chr2 "<< chrom2->get_All_SegVec().size())
 				

@@ -22,6 +22,7 @@
 #include <iterator>
 #include <algorithm>
 #include <numeric>
+#include <cstdlib>
 using namespace std;
 
 #include <memory>
@@ -84,6 +85,13 @@ vector<vector<double>> buildMigMatrix(Parameters &p)
 
 int main(int argc, const char *argv[])
 {
+    std::ofstream details;
+    std::streambuf* terminalErr = nullptr;
+    if (const char* detailsPath = std::getenv("LAICS_RUN_DETAILS")) {
+        details.open(detailsPath, std::ios::app);
+        if (details) terminalErr = std::cerr.rdbuf(details.rdbuf());
+    }
+
     std::cerr << "Random Seed: " << seed << '\n';
 
     auto input_seed = std::stoi(argv[1]);
@@ -109,31 +117,40 @@ int main(int argc, const char *argv[])
     vector<string> param_vec(argv + 2, argv + argc);
     // Construct Parameters using these values.
     Parameters params(infile.str().c_str(), param_vec);
+    if (terminalErr) {
+        std::cerr.flush();
+        std::cerr.rdbuf(terminalErr);
+    }
 
     unsigned int nRuns = params.paramData->nRuns;
     unsigned int nSites = params.paramData->n_SNPs;
 
 
-    const std::string mig_json = "src/migration_matrices.json";
+    const char* migPath = std::getenv("LAICS_MIGRATION_JSON");
+    const std::string mig_json = migPath ? migPath : "migration_matrices.json";
     auto schedule = readMigrationSchedule(mig_json);
 
     vector<vector<double>> mig_prob;
     size_t next_idx = 0;
 
-    if (!schedule.empty()) {
-        double g0 = 0.0;
-        while (next_idx < schedule.size() && schedule[next_idx].first <= g0) {
+    auto resetMigrationSchedule = [&]() {
+        next_idx = 0;
+        mig_prob.clear();
+
+        if (schedule.empty()) {
+            mig_prob = buildMigMatrix(params);
+            return;
+        }
+
+        while (next_idx < schedule.size() && schedule[next_idx].first <= 0.0) {
             mig_prob = schedule[next_idx].second;
             ++next_idx;
         }
         if (mig_prob.empty()) {
-            mig_prob = schedule.front().second; 
+            mig_prob = schedule.front().second;
         }
-        //std::cerr << "[mig] loaded " << schedule.size() << " matrices from " << mig_json << "\n";
-    } else {
-        mig_prob = buildMigMatrix(params);
-    }
-    // -----------------------------
+
+    };
 
     vector<double> outTime(params.paramData->n_SNPs, 0.0);
 
@@ -156,7 +173,7 @@ int main(int argc, const char *argv[])
         if (ticker > 0 && timer % ticker == 0)
             std::cerr << "+";
 
-        params.setPhi();
+        resetMigrationSchedule();
         params.setSNPs();
         params.setCarriers();
         unsigned nCarriers = params.paramData->initChr.size();
@@ -182,12 +199,19 @@ int main(int argc, const char *argv[])
         }
 
         vector<shared_ptr<ARGNode>> allNodes = world->getARGVec();
+        if (!allNodes.empty()) {
+            system("mkdir -p ARG_outputs");
+            stringstream nodesName, edgesName;
+            nodesName << "ARG_outputs/arg_nodes_run" << timer << ".tsv";
+            edgesName << "ARG_outputs/arg_edges_run" << timer << ".tsv";
+            allNodes.back()->writeTskitTables(nodesName.str(), edgesName.str());
+        }
+
         vector<double> tempLD(params.paramData->n_SNPs, 0.0);
         vector<SNPtree> trees;
         unsigned novar = 0;
         vector<double> varPos;
         double lengthLastSite = 0.0;
-
         // For each site, construct the gene tree and process SNP statistics.
         for (int k = 0; k < (int)nSites; ++k)
         {
@@ -208,7 +232,6 @@ int main(int argc, const char *argv[])
             // csvFileName << "genetree_siteposition_" << bp_val << ".csv";
             // geneTree.writeCSV(csvFileName.str());
             // ---------------------------
-
             SNPtree tmp(geneTree, nCarriers, params.paramData->theta);
             unsigned mutantCount = accumulate(tmp.SNPvalues.begin(), tmp.SNPvalues.end(), 0U);
             if (mutantCount > 0)
