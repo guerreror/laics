@@ -44,6 +44,8 @@ smc_flag = "1" if cli_args.mode == "smc" else "0"
 OUTPUT_DIR = Path(cli_args.output_dir).resolve()
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 MIGRATION_JSON = str(OUTPUT_DIR / "migration_matrices.json")
+ADJUSTED_STANDARD_MIGRATION_JSON = str(OUTPUT_DIR / "adjusted_standard_migration_matrices.json")
+ADJUSTED_INVERTED_MIGRATION_JSON = str(OUTPUT_DIR / "adjusted_inverted_migration_matrices.json")
 ORIGINAL_MIGRATION_JSON = str(OUTPUT_DIR / "original_migration_matrices.json")
 RUN_DETAILS = str(OUTPUT_DIR / "run_details.txt")
 
@@ -69,8 +71,9 @@ parameters = {
     "snpPositions": "500 550 600 650 700 750 800 850 900 950",
     "randomSample": "0",
     "pop0":         "10 0",
-    "gc":           "1.0",
-    "dr":           "1.0",
+    "gc":           "0.0",
+    "homo_gc":      "0.0",
+    "dr":           "0.0",
     "tractSize":    "200",
     "hopInformation": "0",
 }
@@ -91,7 +94,9 @@ YAML_KEY_ALIASES = {
     "RandomSNPs": "randSNPs",
     "SiteNodePositions": "snpPositions",
     "RandomSample": "randomSample",
+    "HeterokaryotypicGeneConversionRate": "gc",
     "GeneConversionRate": "gc",
+    "HomokaryotypicGeneConversionRate": "homo_gc",
     "DoubleRecombinationRate": "dr",
     "TractSize": "tractSize",
     "HopInformation": "hopInformation",
@@ -199,19 +204,22 @@ def render_tree_ascii(graph, only_these_leaves=None):
     return "\n".join(lines)
 
 def write_migration_matrices_from_demes(graph, leaf_order, spec_events,
+                                        initial_freqs, inversion_age,
                                         out_json=MIGRATION_JSON,
+                                        adjusted_standard_json=ADJUSTED_STANDARD_MIGRATION_JSON,
+                                        adjusted_inverted_json=ADJUSTED_INVERTED_MIGRATION_JSON,
                                         original_json=ORIGINAL_MIGRATION_JSON):
     matrices, times = graph.migration_matrices()
     deme_order = [d.name for d in graph.demes]
     deme_index = {name: i for i, name in enumerate(deme_order)}
 
-    def adjust_diagonal(matrix):
+    def adjust_diagonal(matrix, digits=5):
         adjusted = []
         for i, row in enumerate(matrix):
             out_row = [float(x) for x in row]
             off_diag_sum = sum(out_row[j] for j in range(len(out_row)) if j != i)
             out_row[i] = 1.0 - off_diag_sum
-            adjusted.append([round(x, 5) for x in out_row])
+            adjusted.append([round(x, digits) for x in out_row])
         return adjusted
 
     original_payload = {
@@ -230,8 +238,9 @@ def write_migration_matrices_from_demes(graph, leaf_order, spec_events,
     pairs = [(float(t), matrix) for t, matrix in original_payload["matrices"].items()]
     pairs.sort(key=lambda x: x[0])
     spec_by_time = defaultdict(list)
-    for A, B, T, _, _ in spec_events:
-        spec_by_time[T].append((int(A), int(B)))
+    # need frequency (F) now that we're adjusting migration matrices for context sizes
+    for A, B, T, F, _ in spec_events:
+        spec_by_time[T].append((int(A), int(B), float(F)))
     spec_times = sorted(spec_by_time)
     next_spec_idx = 0
 
@@ -240,6 +249,13 @@ def write_migration_matrices_from_demes(graph, leaf_order, spec_events,
     leafset = set(leaf_order)
     active_groups = [[name] for name in leaf_order]
     active_names = list(leaf_order)
+    #need to track frequencies for context-size adjustment
+    active_freqs = [float(x) for x in initial_freqs]
+    if len(active_freqs) != len(active_names):
+        raise ValueError(
+            f"Expected {len(active_names)} initial inversion frequencies, "
+            f"got {len(active_freqs)}."
+        )
 
     def parent_for_merge(A, B, T):
         merged = set(active_groups[A]) | set(active_groups[B])
@@ -256,12 +272,14 @@ def write_migration_matrices_from_demes(graph, leaf_order, spec_events,
             T = spec_times[next_spec_idx]
             if T > t + 1e-9:
                 break
-            for A, B in spec_by_time[T]:
+            for A, B, parent_freq in spec_by_time[T]:
                 if A < len(active_groups) and B < len(active_groups):
                     active_names[A] = parent_for_merge(A, B, T)
                     active_groups[A].extend(active_groups[B])
+                    active_freqs[A] = parent_freq
                     del active_groups[B]
                     del active_names[B]
+                    del active_freqs[B]
             next_spec_idx += 1
 
     def source_matrix_at(t):
@@ -274,7 +292,25 @@ def write_migration_matrices_from_demes(graph, leaf_order, spec_events,
         return chosen
 
     payload = {}
-    output_times = sorted(set(list(times) + [ev[2] for ev in spec_events]))
+    adjusted_standard_payload = {}
+    adjusted_inverted_payload = {}
+    # Context-size-adjusted migration rates must be recalculated whenever a
+    # population-size epoch changes, as well as at migration/speciation epochs.
+    demographic_times = [
+        float(epoch.end_time)
+        for deme in graph.demes
+        for epoch in deme.epochs
+        if 0 < epoch.end_time < float("inf")
+    ]
+    output_time_values = (
+        list(times)
+        + [ev[2] for ev in spec_events]
+        + demographic_times
+    )
+    # If inv age is >0, include it so context frequencies are updated there too.
+    if inversion_age > 0:
+        output_time_values.append(float(inversion_age))
+    output_times = sorted(set(output_time_values))
     for t in output_times:
         apply_speciation_until(t)
         src = source_matrix_at(t)
@@ -289,8 +325,43 @@ def write_migration_matrices_from_demes(graph, leaf_order, spec_events,
             remapped.append(row)
         payload[str(int(t))] = adjust_diagonal(remapped)
 
+        # Precompute the full context-size conversion used for backward migration.
+        # ARG/x0 retain the raw schedule and their existing q1/q2 calculation.
+        active_sizes = [float(by_name[name].size_at(t)) for name in active_names]
+        # If the inversion has reached its age, we set the effective frequencies to zero for the purpose of context-size adjustment.
+        effective_freqs = (
+            [0.0] * len(active_freqs)
+            if inversion_age > 0 and t + 1e-9 >= inversion_age
+            else active_freqs
+        )
+
+        def adjusted_for_arrangement(inverted):
+            context_sizes = [
+                size * (freq if inverted else 1.0 - freq)
+                for size, freq in zip(active_sizes, effective_freqs)
+            ]
+            adjusted_matrix = []
+            for i, row in enumerate(remapped):
+                adjusted_row = []
+                for j, raw_rate in enumerate(row):
+                    if i == j or context_sizes[i] <= 0.0:
+                        adjusted_row.append(0.0)
+                    else:
+                        adjusted_row.append(
+                            float(raw_rate) * context_sizes[j] / context_sizes[i]
+                        )
+                adjusted_matrix.append(adjusted_row)
+            return adjust_diagonal(adjusted_matrix, digits=12)
+
+        adjusted_standard_payload[str(int(t))] = adjusted_for_arrangement(False)
+        adjusted_inverted_payload[str(int(t))] = adjusted_for_arrangement(True)
+
     with open(out_json, "w") as f:
         json.dump(payload, f, indent=4)
+    with open(adjusted_standard_json, "w") as f:
+        json.dump(adjusted_standard_payload, f, indent=4)
+    with open(adjusted_inverted_json, "w") as f:
+        json.dump(adjusted_inverted_payload, f, indent=4)
 
 # ---------- Speciation (sizes + events) ----------
 def build_speciation_from_demes(graph, ancestor_freqs=None, default_F=0.2):
@@ -554,7 +625,13 @@ if deme_params:
         parameters["inv_freq"] = " ".join(freqs)
 
 try:
-    write_migration_matrices_from_demes(graph, debug_info["leaf_order"], debug_info["events"])
+    write_migration_matrices_from_demes(
+        graph,
+        debug_info["leaf_order"],
+        debug_info["events"],
+        [float(x) for x in parameters["inv_freq"].split()],
+        float(parameters["inv_age"]),
+    )
 except Exception as e:
     print(f"Error writing {MIGRATION_JSON}: {e}", file=sys.stderr)
     sys.exit(1)
@@ -660,17 +737,24 @@ args_list = (
     [parameters["randomSample"]] +
     per_pop_strings
 )
+
+args_list += [
+    parameters["gc"],
+    parameters["dr"],
+    parameters["tractSize"],
+    parameters["homo_gc"],
+]
+
 if smc_flag == "1":
     args_list += [
-        parameters["gc"],
-        parameters["dr"],
-        parameters["tractSize"],
         parameters["hopInformation"],
     ]
 
 try:
     process_env = os.environ.copy()
     process_env["LAICS_MIGRATION_JSON"] = MIGRATION_JSON
+    process_env["LAICS_ADJUSTED_STANDARD_MIGRATION_JSON"] = ADJUSTED_STANDARD_MIGRATION_JSON
+    process_env["LAICS_ADJUSTED_INVERTED_MIGRATION_JSON"] = ADJUSTED_INVERTED_MIGRATION_JSON
     process_env["LAICS_RUN_DETAILS"] = RUN_DETAILS
     if TREE_OUTPUT_DIR:
         process_env["LAICS_TREE_OUTPUT_DIR"] = str(TREE_OUTPUT_DIR)

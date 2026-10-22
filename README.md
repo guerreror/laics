@@ -117,12 +117,9 @@ SMC configurations live in `SMC_input/`; ARG configuration lives in `ARG_input/`
 - `BasesPerMorgan`:
   - Bases per Morgan (scaling from physical bp to recombination units)
 
-- `RandPhi`:
-  - ARG only. `1` to sample `log10(Phi)` uniformly in a range.
-  - `0` to use fixed `Phi`
-
-- `Phi`:  
-  ARG fixed gene-flux when `RandPhi = 0`
+- `RandPhi` and `Phi`:
+  Legacy ARG fields retained only for command-line compatibility. Gene flux now
+  uses the separate gene-conversion and double-recombination rates below.
 
 - `InversionRange`:  
   Inversion span in bp (scaled internally)
@@ -153,8 +150,14 @@ SMC configurations live in `SMC_input/`; ARG configuration lives in `ARG_input/`
     pop1: "2 0"
   ```
 
-- `GeneConversionRate`:
-  SMC local GC rectangle height.
+- `HeterokaryotypicGeneConversionRate` (or `GeneConversionRate`):
+  Heterokaryotypic gene-conversion rate.
+
+- `HomokaryotypicGeneConversionRate`:
+  Homokaryotypic gene-conversion rate.
 
 - `DoubleRecombinationRate`:
-  SMC DR triangle peak height.
+  Double-recombination rate.
+
+- `TractSize`:
+  Gene-conversion tract length in bases.

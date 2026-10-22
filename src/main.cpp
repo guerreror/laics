@@ -133,20 +133,24 @@ int main(int argc, const char *argv[])
     vector<vector<double>> mig_prob;
     size_t next_idx = 0;
 
-    if (!schedule.empty()) {
-        double g0 = 0.0;
-        while (next_idx < schedule.size() && schedule[next_idx].first <= g0) {
+    auto resetMigrationSchedule = [&]() {
+        next_idx = 0;
+        mig_prob.clear();
+
+        if (schedule.empty()) {
+            mig_prob = buildMigMatrix(params);
+            return;
+        }
+
+        while (next_idx < schedule.size() && schedule[next_idx].first <= 0.0) {
             mig_prob = schedule[next_idx].second;
             ++next_idx;
         }
         if (mig_prob.empty()) {
-            mig_prob = schedule.front().second; 
+            mig_prob = schedule.front().second;
         }
-        //std::cerr << "[mig] loaded " << schedule.size() << " matrices from " << mig_json << "\n";
-    } else {
-        mig_prob = buildMigMatrix(params);
-    }
-    // -----------------------------
+
+    };
 
     vector<double> outTime(params.paramData->n_SNPs, 0.0);
 
@@ -169,7 +173,7 @@ int main(int argc, const char *argv[])
         if (ticker > 0 && timer % ticker == 0)
             std::cerr << "+";
 
-        params.setPhi();
+        resetMigrationSchedule();
         params.setSNPs();
         params.setCarriers();
         unsigned nCarriers = params.paramData->initChr.size();

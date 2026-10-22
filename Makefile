@@ -7,6 +7,10 @@ TSKIT_C := $(ROOT)/third_party/tskit/c
 THIRD_PARTY := $(ROOT)/third_party
 TSKIT_BUILD := $(ROOT)/build/tskit
 TSKIT_OBJS := $(TSKIT_BUILD)/core.o $(TSKIT_BUILD)/tables.o $(TSKIT_BUILD)/kastore.o
+DEPS_FLAGS := -I /opt/homebrew/opt/yaml-cpp/include -L /opt/homebrew/opt/yaml-cpp/lib
+ifneq ($(strip $(CONDA_PREFIX)),)
+DEPS_FLAGS := -I "$(CONDA_PREFIX)/include" -L "$(CONDA_PREFIX)/lib" -Wl,-rpath,"$(CONDA_PREFIX)/lib"
+endif
 .PHONY: run run-smc run-smc-batch run-arg compile compile-arg render-arg delete-op clean-generated
 
 run-smc:
@@ -25,11 +29,10 @@ compile:
 	@cc -std=c99 -O3 -I "$(TSKIT_C)" -I "$(TSKIT_C)/subprojects/kastore" -c "$(TSKIT_C)/tskit/tables.c" -o "$(TSKIT_BUILD)/tables.o"
 	@cc -std=c99 -O3 -I "$(TSKIT_C)" -I "$(TSKIT_C)/subprojects/kastore" -c "$(TSKIT_C)/subprojects/kastore/kastore.c" -o "$(TSKIT_BUILD)/kastore.o"
 	@cd "$(SRC)" && g++ -std=c++14 -O3 -g -fno-omit-frame-pointer \
-		-I /opt/homebrew/opt/yaml-cpp/include \
+		$(DEPS_FLAGS) \
 		-I "$(THIRD_PARTY)" \
 		-I "$(TSKIT_C)" \
 		-I "$(TSKIT_C)/subprojects/kastore" \
-		-L /opt/homebrew/opt/yaml-cpp/lib \
 		argnode.cpp chromosome.cpp poisevents.cpp simulate.cpp sitenode.cpp migprob.cpp world.cpp parameters.cpp smc.cpp chromrecomb.cpp smc_helpers.cpp treemod.cpp simulate_smc.cpp \
 		"$(TSKIT_BUILD)/core.o" "$(TSKIT_BUILD)/tables.o" "$(TSKIT_BUILD)/kastore.o" \
 		-lyaml-cpp \
@@ -38,9 +41,8 @@ compile:
 
 compile-arg:
 	@cd "$(SRC)" && g++ -std=c++14 -O3 -g -fno-omit-frame-pointer \
-		-I /opt/homebrew/opt/yaml-cpp/include \
+		$(DEPS_FLAGS) \
 		-I "$(THIRD_PARTY)" \
-		-L /opt/homebrew/opt/yaml-cpp/lib \
 		main.cpp argnode.cpp chromosome.cpp poisevents.cpp simulate.cpp sitenode.cpp migprob.cpp world.cpp parameters.cpp chromrecomb.cpp \
 		-lyaml-cpp \
 		-o labp_v21
