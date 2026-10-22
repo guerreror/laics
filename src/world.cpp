@@ -13,6 +13,7 @@
 
 //#define DEBUGGER
 // Includes from STL:
+	#include <cassert>
 	#include <iostream>
 		using std::cout;
 		using std::endl;

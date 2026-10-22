@@ -361,40 +361,33 @@ struct TskitCEdgeInterval {
     uint64_t child;
 };
 
-struct TskitCNodeKey {
-    int32_t run;
-    uint64_t id;
-    bool operator==(const TskitCNodeKey& other) const {
-        return run == other.run && id == other.id;
-    }
-};
-
 struct TskitCEdgeKey {
-    int32_t run;
     uint64_t parent;
     uint64_t child;
     bool operator==(const TskitCEdgeKey& other) const {
-        return run == other.run && parent == other.parent && child == other.child;
+        return parent == other.parent && child == other.child;
     }
 };
 
 struct TskitCKeyHash {
-    size_t operator()(const TskitCNodeKey& k) const {
-        return std::hash<uint64_t>()((static_cast<uint64_t>(k.run) << 32) ^ k.id);
-    }
     size_t operator()(const TskitCEdgeKey& k) const {
-        uint64_t h = (static_cast<uint64_t>(k.run) << 32) ^ k.parent;
+        uint64_t h = k.parent;
         h ^= k.child + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
         return std::hash<uint64_t>()(h);
     }
 };
 
+struct TskitCOpenEdge {
+    size_t index;
+    uint64_t generation;
+};
+
 struct TskitCStore {
     std::vector<TskitCNodeRecord> nodes;
     std::vector<TskitCEdgeInterval> edges;
-    std::unordered_set<TskitCNodeKey, TskitCKeyHash> seenNodes;
-    std::unordered_map<TskitCEdgeKey, size_t, TskitCKeyHash> openEdges;
-    std::unordered_set<TskitCEdgeKey, TskitCKeyHash> activeEdges;
+    std::vector<uint8_t> seenNodeIds;
+    std::unordered_map<TskitCEdgeKey, TskitCOpenEdge, TskitCKeyHash> openEdges;
+    uint64_t edgeGeneration = 0;
 
     static void checkTsk(int ret, const char* where) {
         if (ret < 0) {
@@ -402,40 +395,43 @@ struct TskitCStore {
         }
     }
 
-    void collect(TreeNode* node, int run, double left, double right,
-                 std::unordered_set<TskitCEdgeKey, TskitCKeyHash>& activeEdges) {
+    void collect(TreeNode* node, int run, double left, double right) {
         if (!node) return;
         const uint64_t nodeId = static_cast<uint64_t>(node->id);
-        const TskitCNodeKey nk{static_cast<int32_t>(run), nodeId};
-        if (seenNodes.insert(nk).second) {
+        if (nodeId >= seenNodeIds.size()) seenNodeIds.resize(nodeId + 1, 0);
+        if (!seenNodeIds[nodeId]) {
+            seenNodeIds[nodeId] = 1;
             nodes.push_back({static_cast<int32_t>(run), nodeId, node->time,
                              static_cast<uint32_t>(node->context.pop)});
         }
         for (auto* child : node->children) {
             if (!child) continue;
             const uint64_t childId = static_cast<uint64_t>(child->id);
-            const TskitCEdgeKey ek{static_cast<int32_t>(run), nodeId, childId};
-            activeEdges.insert(ek);
+            const TskitCEdgeKey ek{nodeId, childId};
             if (right > left) {
                 auto it = openEdges.find(ek);
-                if (it != openEdges.end() && std::abs(edges[it->second].right - left) <= 1e-9) {
-                    edges[it->second].right = right;
+                if (it != openEdges.end() &&
+                    std::abs(edges[it->second.index].right - left) <= 1e-9) {
+                    edges[it->second.index].right = right;
                 } else {
                     edges.push_back({static_cast<int32_t>(run), left, right, nodeId, childId});
-                    openEdges[ek] = edges.size() - 1;
+                    if (it == openEdges.end()) {
+                        it = openEdges.emplace(ek, TskitCOpenEdge{}).first;
+                    }
+                    it->second.index = edges.size() - 1;
                 }
+                it->second.generation = edgeGeneration;
             }
-            collect(child, run, left, right, activeEdges);
+            collect(child, run, left, right);
         }
     }
 
     void append(TreeNode* tree, int run, double left, double right) {
         if (!tree) return;
-        activeEdges.clear();
-        activeEdges.reserve(openEdges.size() + 32);
-        collect(tree, run, left, right, activeEdges);
+        ++edgeGeneration;
+        collect(tree, run, left, right);
         for (auto it = openEdges.begin(); it != openEdges.end();) {
-            if (it->first.run == run && activeEdges.find(it->first) == activeEdges.end()) {
+            if (it->second.generation != edgeGeneration) {
                 it = openEdges.erase(it);
             } else {
                 ++it;
@@ -444,48 +440,70 @@ struct TskitCStore {
     }
 
     void finishRun(int run) {
-        for (auto it = openEdges.begin(); it != openEdges.end();) {
-            if (it->first.run == run) it = openEdges.erase(it);
-            else ++it;
-        }
+        (void) run;
+        openEdges.clear();
+        seenNodeIds.clear();
+        edgeGeneration = 0;
+    }
+
+    size_t storedBytes() const {
+        return nodes.size() * sizeof(TskitCNodeRecord)
+             + edges.size() * sizeof(TskitCEdgeInterval);
+    }
+
+    void clear() {
+        nodes.clear();
+        edges.clear();
+        finishRun(0);
     }
 
     void writeRun(const std::vector<const TskitCNodeRecord*>& runNodes,
                   const std::vector<const TskitCEdgeInterval*>& runEdges,
                   const std::string& outPath) const {
-        std::unordered_map<uint64_t, const TskitCNodeRecord*> allNodes;
-        allNodes.reserve(runNodes.size());
+        uint64_t maxNodeId = 0;
+        for (const auto* n : runNodes) maxNodeId = std::max(maxNodeId, n->id);
+        std::vector<const TskitCNodeRecord*> allNodes(maxNodeId + 1, nullptr);
         for (const auto* n : runNodes) allNodes[n->id] = n;
-
-        std::unordered_map<uint64_t, TskitCNodeRecord> usedNodes;
+        std::vector<TskitCNodeRecord> usedNodes(maxNodeId + 1);
+        std::vector<uint8_t> used(maxNodeId + 1, 0);
         double sequenceLength = 0.0;
         uint32_t maxPop = 0;
         for (const auto* edge : runEdges) {
             const auto& e = *edge;
             if (e.right <= e.left) continue;
             sequenceLength = std::max(sequenceLength, e.right);
-            const auto parentIt = allNodes.find(e.parent);
-            const auto childIt = allNodes.find(e.child);
-            if (parentIt != allNodes.end()) {
-                usedNodes[e.parent] = *parentIt->second;
-                maxPop = std::max(maxPop, parentIt->second->pop);
+            if (e.parent < allNodes.size() && allNodes[e.parent]) {
+                usedNodes[e.parent] = *allNodes[e.parent];
+                used[e.parent] = 1;
+                maxPop = std::max(maxPop, allNodes[e.parent]->pop);
             }
-            if (childIt != allNodes.end()) {
-                usedNodes[e.child] = *childIt->second;
-                maxPop = std::max(maxPop, childIt->second->pop);
+            if (e.child < allNodes.size() && allNodes[e.child]) {
+                usedNodes[e.child] = *allNodes[e.child];
+                used[e.child] = 1;
+                maxPop = std::max(maxPop, allNodes[e.child]->pop);
             }
         }
-        if (sequenceLength <= 0.0 || usedNodes.empty()) return;
-        bool changed = true;
-        while (changed) {
-            changed = false;
-            for (const auto* edge : runEdges) {
-                const auto& e = *edge;
-                if (e.right <= e.left) continue;
-                if (usedNodes[e.parent].time <= usedNodes[e.child].time) {
-                    usedNodes[e.parent].time = usedNodes[e.child].time + 1e-9;
-                    changed = true;
+        if (sequenceLength <= 0.0 || runNodes.empty()) return;
+        std::vector<std::vector<uint64_t>> parentsByChild(maxNodeId + 1);
+        std::vector<size_t> remainingChildren(maxNodeId + 1, 0);
+        for (const auto* edge : runEdges) {
+            const auto& e = *edge;
+            if (e.right <= e.left) continue;
+            parentsByChild[e.child].push_back(e.parent);
+            ++remainingChildren[e.parent];
+        }
+        std::queue<uint64_t> ready;
+        for (uint64_t id = 0; id <= maxNodeId; ++id) {
+            if (used[id] && remainingChildren[id] == 0) ready.push(id);
+        }
+        while (!ready.empty()) {
+            const uint64_t child = ready.front();
+            ready.pop();
+            for (const uint64_t parent : parentsByChild[child]) {
+                if (usedNodes[parent].time <= usedNodes[child].time) {
+                    usedNodes[parent].time = usedNodes[child].time + 1e-9;
                 }
+                if (--remainingChildren[parent] == 0) ready.push(parent);
             }
         }
 
@@ -502,27 +520,48 @@ struct TskitCStore {
                      "tsk_population_table_add_row");
         }
 
-        std::unordered_map<uint64_t, tsk_id_t> rowFor;
-        std::vector<uint64_t> ids;
-        for (const auto& kv : usedNodes) ids.push_back(kv.first);
-        std::sort(ids.begin(), ids.end());
-        for (uint64_t id : ids) {
+        const size_t usedCount = static_cast<size_t>(
+            std::count(used.begin(), used.end(), static_cast<uint8_t>(1)));
+        std::vector<tsk_flags_t> nodeFlags;
+        std::vector<double> nodeTimes;
+        std::vector<tsk_id_t> nodePops;
+        nodeFlags.reserve(usedCount);
+        nodeTimes.reserve(usedCount);
+        nodePops.reserve(usedCount);
+        std::vector<tsk_id_t> rowFor(maxNodeId + 1, TSK_NULL);
+        for (uint64_t id = 0; id <= maxNodeId; ++id) {
+            if (!used[id]) continue;
             const auto& n = usedNodes[id];
-            const tsk_flags_t flags = (std::abs(n.time) <= 1e-12) ? TSK_NODE_IS_SAMPLE : 0;
-            const tsk_id_t row = tsk_node_table_add_row(
-                &tables.nodes, flags, n.time, static_cast<tsk_id_t>(n.pop),
-                TSK_NULL, NULL, 0);
-            checkTsk(row, "tsk_node_table_add_row");
-            rowFor[id] = row;
+            rowFor[id] = static_cast<tsk_id_t>(nodeTimes.size());
+            nodeFlags.push_back((std::abs(n.time) <= 1e-12) ? TSK_NODE_IS_SAMPLE : 0);
+            nodeTimes.push_back(n.time);
+            nodePops.push_back(static_cast<tsk_id_t>(n.pop));
         }
+        checkTsk(tsk_node_table_set_columns(&tables.nodes,
+                     static_cast<tsk_size_t>(nodeTimes.size()), nodeFlags.data(),
+                     nodeTimes.data(), nodePops.data(), NULL, NULL, NULL),
+                 "tsk_node_table_set_columns");
 
+        std::vector<double> edgeLeft;
+        std::vector<double> edgeRight;
+        std::vector<tsk_id_t> edgeParent;
+        std::vector<tsk_id_t> edgeChild;
+        edgeLeft.reserve(runEdges.size());
+        edgeRight.reserve(runEdges.size());
+        edgeParent.reserve(runEdges.size());
+        edgeChild.reserve(runEdges.size());
         for (const auto* edge : runEdges) {
             const auto& e = *edge;
             if (e.right <= e.left) continue;
-            const tsk_id_t row = tsk_edge_table_add_row(
-                &tables.edges, e.left, e.right, rowFor[e.parent], rowFor[e.child], NULL, 0);
-            checkTsk(row, "tsk_edge_table_add_row");
+            edgeLeft.push_back(e.left);
+            edgeRight.push_back(e.right);
+            edgeParent.push_back(rowFor[e.parent]);
+            edgeChild.push_back(rowFor[e.child]);
         }
+        checkTsk(tsk_edge_table_set_columns(&tables.edges,
+                     static_cast<tsk_size_t>(edgeLeft.size()), edgeLeft.data(), edgeRight.data(),
+                     edgeParent.data(), edgeChild.data(), NULL, NULL),
+                 "tsk_edge_table_set_columns");
 
         const char timestamp[] = "generated-by-laics-smc";
         const char record[] = "{\"software\":\"laics-smc\",\"writer\":\"tskit-c-api\"}";
@@ -548,7 +587,7 @@ struct TskitCStore {
         for (const auto& kv : edgesByRun) runs.push_back(kv.first);
         std::sort(runs.begin(), runs.end());
         const unsigned int hw = std::thread::hardware_concurrency();
-        const size_t maxWorkers = std::max<size_t>(1, std::min<size_t>(4, hw ? hw : 2));
+        const size_t maxWorkers = std::max<size_t>(1, std::min<size_t>(8, hw ? hw : 2));
         std::vector<std::future<void>> jobs;
         for (int run : runs) {
             jobs.push_back(std::async(std::launch::async, [this, &nodesByRun, &edgesByRun, outDir, run]() {
@@ -591,6 +630,13 @@ static void printProgress(int completed, int total, int& lastBucket)
 
 int main(int argc, const char *argv[])
 {
+    std::ofstream details;
+    std::streambuf* terminalErr = nullptr;
+    if (const char* detailsPath = std::getenv("LAICS_RUN_DETAILS")) {
+        details.open(detailsPath, std::ios::app);
+        if (details) terminalErr = std::cerr.rdbuf(details.rdbuf());
+    }
+
     std::cerr << "Random Seed: " << seed << '\n';
 
     auto input_seed = std::stoi(argv[1]);
@@ -609,6 +655,10 @@ int main(int argc, const char *argv[])
 
     vector<string> param_vec(argv + 2, argv + argc);
     Parameters params(infile.str().c_str(), param_vec);
+    if (terminalErr) {
+        std::cerr.flush();
+        std::cerr.rdbuf(terminalErr);
+    }
 
     unsigned int nRuns = params.paramData->nRuns;
     unsigned int nSites = params.paramData->n_SNPs;
@@ -629,15 +679,19 @@ int main(int argc, const char *argv[])
     unsigned long long profActiveMinScans = 0, profFluxRemoveScans = 0, profMaxActiveFlux = 0;
     unsigned long long profHops = 0;
 
-    std::cerr << "\n\n";
     int progressBucket = -1;
     printProgress(0, static_cast<int>(nRuns), progressBucket);
 
-    const std::string mig_json = "src/migration_matrices.json";
-    const std::string adjusted_standard_mig_json =
-        "src/adjusted_standard_migration_matrices.json";
-    const std::string adjusted_inverted_mig_json =
-        "src/adjusted_inverted_migration_matrices.json";
+    const char* migPath = std::getenv("LAICS_MIGRATION_JSON");
+    const std::string mig_json = migPath ? migPath : "migration_matrices.json";
+    const char* adjustedStandardPath =
+        std::getenv("LAICS_ADJUSTED_STANDARD_MIGRATION_JSON");
+    const char* adjustedInvertedPath =
+        std::getenv("LAICS_ADJUSTED_INVERTED_MIGRATION_JSON");
+    const std::string adjusted_standard_mig_json = adjustedStandardPath
+        ? adjustedStandardPath : "adjusted_standard_migration_matrices.json";
+    const std::string adjusted_inverted_mig_json = adjustedInvertedPath
+        ? adjustedInvertedPath : "adjusted_inverted_migration_matrices.json";
     auto schedule = readMigrationSchedule(mig_json);
     auto adjusted_standard_schedule =
         readMigrationSchedule(adjusted_standard_mig_json);
@@ -739,6 +793,10 @@ int main(int argc, const char *argv[])
         hopEvents << "run,hop,current_x,event,event_time,raw_delta_x,used_delta_x,next_x\n";
     }
     TskitCStore treeSequences;
+    const size_t treeBatchBytes = size_t{512} * 1024 * 1024;
+    const char* treeOutputPath = std::getenv("LAICS_TREE_OUTPUT_DIR");
+    const std::string treeOutputDir =
+        treeOutputPath && *treeOutputPath ? treeOutputPath : "smc_trees";
 
     for (int timer = 0; timer < (int)nRuns; ++timer)
     {
@@ -983,14 +1041,19 @@ int main(int argc, const char *argv[])
         treeSequences.finishRun(timer);
         delete world;
         printProgress(timer + 1, static_cast<int>(nRuns), progressBucket);
+
+        if (treeSequences.storedBytes() >= treeBatchBytes || timer + 1 == static_cast<int>(nRuns)) {
+            const auto writeStart = ProfileClock::now();
+            treeSequences.write(treeOutputDir);
+            const double seconds = elapsedSec(writeStart, ProfileClock::now());
+            if (smcProfile) profTskWrite += seconds;
+            treeSequences.clear();
+        }
     }
 
     end = std::chrono::system_clock::now();
-    auto writeStart = profNow();
-    treeSequences.write("smc_trees");
-    if (smcProfile) profTskWrite = elapsedSec(writeStart, ProfileClock::now());
     std::chrono::duration<double> elapsed_seconds = end - start;
-    std::cerr << "Elapsed time: " << elapsed_seconds.count() << "s\n";
+    std::cerr << "Total elapsed time: " << elapsed_seconds.count() << "s\n";
     if (smcProfile) {
         std::cerr << "SMC_PROFILE hops=" << profHops << "\n";
         std::cerr << "SMC_PROFILE arg_generation=" << profArg << "\n";

@@ -13,15 +13,12 @@
 #include <utility>
 #include <vector>
 
-#include <boost/math/special_functions/binomial.hpp>
-
 #include "argnode.h"
 #include "chromosome.h"
 #include "ran_mk.h"
 #include "smc_helpers.h"
 #include "world.h"
 
-using boost::math::binomial_coefficient;
 using std::map;
 using std::vector;
 
@@ -906,11 +903,12 @@ unsigned short World::simulateGeneration_SMC(vector<vector<double>>& mig_prob) {
             totalM += mRate[clustID];
 
             if (k > 1) {
-                unsigned int a = 2;
                 if (clustSize == 0) {
                     std::cerr << "Error in simulateGeneration_SMC(): Carriers in empty context\n";
                 }
-                double ka = binomial_coefficient<double>(k, a) / clustSize;
+                const unsigned long long pairs =
+                    (static_cast<unsigned long long>(k) * (k - 1)) / 2;
+                double ka = static_cast<double>(pairs) / clustSize;
                 cRate.push_back(ka);
                 totalC += ka;
             }

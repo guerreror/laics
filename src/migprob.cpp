@@ -2,7 +2,7 @@
 #include <fstream>
 #include <map>
 #include <algorithm>
-#include "json.hpp"
+#include <nlohmann/json.hpp>
 #include "migprob.h"
 
 using json = nlohmann::json;

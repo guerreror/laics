@@ -85,6 +85,13 @@ vector<vector<double>> buildMigMatrix(Parameters &p)
 
 int main(int argc, const char *argv[])
 {
+    std::ofstream details;
+    std::streambuf* terminalErr = nullptr;
+    if (const char* detailsPath = std::getenv("LAICS_RUN_DETAILS")) {
+        details.open(detailsPath, std::ios::app);
+        if (details) terminalErr = std::cerr.rdbuf(details.rdbuf());
+    }
+
     std::cerr << "Random Seed: " << seed << '\n';
 
     auto input_seed = std::stoi(argv[1]);
@@ -110,12 +117,17 @@ int main(int argc, const char *argv[])
     vector<string> param_vec(argv + 2, argv + argc);
     // Construct Parameters using these values.
     Parameters params(infile.str().c_str(), param_vec);
+    if (terminalErr) {
+        std::cerr.flush();
+        std::cerr.rdbuf(terminalErr);
+    }
 
     unsigned int nRuns = params.paramData->nRuns;
     unsigned int nSites = params.paramData->n_SNPs;
 
 
-    const std::string mig_json = "src/migration_matrices.json";
+    const char* migPath = std::getenv("LAICS_MIGRATION_JSON");
+    const std::string mig_json = migPath ? migPath : "migration_matrices.json";
     auto schedule = readMigrationSchedule(mig_json);
 
     vector<vector<double>> mig_prob;
