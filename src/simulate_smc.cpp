@@ -141,6 +141,22 @@ static double computeTotalG_SMC(const TreeNode* cutRoot,
     return localPhi * stdFreq;
 }
 
+// Compute the total homokaryotypic gene conversion rate for a cut lineage
+static double computeTotalHomoG_SMC(const TreeNode* cutRoot,
+                                    const Parameters::ParameterData& params,
+                                    double t) {
+    if (!cutRoot) return 0.0;
+    const unsigned int pop = cutRoot->context.pop;
+    const SMCActiveState& state = activeStateAtTime_SMC(params, t);
+    if (pop >= state.invFreqs.size()) return 0.0;
+
+    const double invFreq = state.invFreqs[pop];
+    const double sameArrangementFrequency = cutRoot->context.inversion == 1
+        ? invFreq
+        : 1.0 - invFreq;
+    return std::max(0.0, params.homoGcRate) * sameArrangementFrequency;
+}
+
 static double triangleHeightAtX_SMC(double x, const Segment& range, double peakHeight) {
     const double L = range.L;
     const double R = range.R;
@@ -536,8 +552,10 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
 
     while (lineages.size() > 1) {
         std::vector<double> totalM_i(lineages.size(), 0.0);
+        std::vector<double> totalHomoG_i(lineages.size(), 0.0);
         std::vector<double> totalG_i(lineages.size(), 0.0);
         double totalM = 0.0;
+        double totalHomoG = 0.0;
         double totalG = 0.0;
 
         for (size_t i = 0; i < lineages.size(); ++i) {
@@ -547,12 +565,14 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
             const auto& activeMig = migrationMatrixAtTime_SMC(
                 lineageSchedule, mig_prob, currentTime);
             totalM_i[i] = computeTotalM_SMC(lineages[i], activeMig);
+            totalHomoG_i[i] = computeTotalHomoG_SMC(lineages[i], params, currentTime);
             totalG_i[i] = computeTotalG_SMC(lineages[i], params, currentTime, currentHopX);
             totalM += totalM_i[i];
+            totalHomoG += totalHomoG_i[i];
             totalG += totalG_i[i];
         }
         const double totalC = computeTotalCForLineages_SMC(lineages, params, currentTime);
-        const double Rate = totalC + totalM + totalG;
+        const double Rate = totalC + totalM + totalHomoG + totalG;
         if (Rate <= 0.0) {
             double nextEpoch = 0.0;
             if (nextModelEpochAfter_SMC(params, currentTime, nextEpoch)) {
@@ -602,7 +622,7 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
                 }
             }
             if (pairs.empty()) {
-                if (totalM <= 0.0 && totalG <= 0.0) {
+                if (totalM <= 0.0 && totalHomoG <= 0.0 && totalG <= 0.0) {
                     double nextEpoch = 0.0;
                     if (nextModelEpochAfter_SMC(params, currentTime, nextEpoch)) {
                         currentTime = nextEpoch;
@@ -661,6 +681,27 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
                 break;
             }
             rem -= totalM_i[i];
+
+            // homoGC event handling above root
+            if (rem < totalHomoG_i[i]) {
+                const Context newCtx = lineages[i]->context;
+                TreeNode* nr = addUnaryAbove(lineages[i], nextId++, event_time, newCtx);
+                if (nr) nr->isGeneFluxMarker = true;
+                if (nr && nr->parent == nullptr) lineages[i] = nr;
+                if (outcome) {
+                    GeneFluxEvent_SMC evt = makeGeneFluxSegment_SMC(
+                        currentHopX,
+                        nr ? nr->id : 0,
+                        GeneFluxType_SMC::HomokaryotypicGC,
+                        params);
+                    outcome->geneFluxEvents.push_back(evt);
+                }
+                recordEventRow_SMC(evlog, runIndex, hopIndex, currentHopX,
+                                   "gene_flux_fallback_HomoGC", event_time);
+                handled = true;
+                break;
+            }
+            rem -= totalHomoG_i[i];
 
             if (rem < totalG_i[i]) {
                 Context newCtx = lineages[i]->context;
@@ -771,8 +812,9 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
         double pairRate = computeTotalC_SMC(params, lineageTime, cutRoot->context);
         double totalC = static_cast<double>(eligibleTargets.size()) * pairRate;
 
+        double totalHomoG = computeTotalHomoG_SMC(cutRoot, params, lineageTime);
         double totalG = computeTotalG_SMC(cutRoot, params, lineageTime, currentHopX);
-        double Rate = totalM + totalC + totalG;
+        double Rate = totalM + totalC + totalHomoG + totalG;
         if (Rate <= 0.0) {
             double nextEpoch = 0.0;
             if (nextModelEpochAfter_SMC(params, lineageTime, nextEpoch)) {
@@ -846,7 +888,11 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
         double roll = randreal(0, Rate);
         bool is_migration = (roll < totalM);
         bool is_coalescence = (!is_migration && roll < (totalM + totalC));
-        bool is_gene_flux = (!is_migration && !is_coalescence);
+        bool is_homokaryotypic_gc =
+            (!is_migration && !is_coalescence &&
+             roll < (totalM + totalC + totalHomoG));
+        bool is_gene_flux =
+            (!is_migration && !is_coalescence && !is_homokaryotypic_gc);
 
         if (is_migration) {
             Context newCtx = cutRoot->context;
@@ -867,9 +913,11 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
             lineageTime = event_time;
             applyEpochEventsToLineageAtTime_SMC(cutRoot, lineageTime, params, nextNodeId);
             continue;
-        } else if (is_gene_flux) {
+        } else if (is_homokaryotypic_gc || is_gene_flux) {
             Context newCtx = cutRoot->context;
-            newCtx.inversion = (newCtx.inversion == 0 ? 1 : 0);
+            if (is_gene_flux) {
+                newCtx.inversion = (newCtx.inversion == 0 ? 1 : 0);
+            }
             const unsigned long geneFluxNodeId = nextNodeId++;
             TreeNode* newRoot = addUnaryAbove(cutRoot, geneFluxNodeId, event_time, newCtx);
             if (newRoot) newRoot->isGeneFluxMarker = true;
@@ -878,8 +926,9 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
             }
             lineageTime = event_time;
 
-            const GeneFluxType_SMC geneFluxType =
-                pickGeneFluxType_SMC(nextGeneFluxStartX, params);
+            const GeneFluxType_SMC geneFluxType = is_homokaryotypic_gc
+                ? GeneFluxType_SMC::HomokaryotypicGC
+                : pickGeneFluxType_SMC(nextGeneFluxStartX, params);
             GeneFluxEvent_SMC evt = makeGeneFluxSegment_SMC(nextGeneFluxStartX,
                                                             geneFluxNodeId,
                                                             geneFluxType,
