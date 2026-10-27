@@ -254,6 +254,24 @@ static bool processGeneFluxBoundariesAtX(
             }
             continue;
         }
+
+        // A later recombination can leave a protected tract marker as a
+        // unary root. There is no retained ancestry to reattach against in
+        // that case, so ending the tract only requires removing the marker.
+        if (!gfNode->parent && gfNode == activeTree && gfNode->children.size() == 1) {
+            TreeNode* newRoot = gfNode->children.front();
+            gfNode->children.clear();
+            newRoot->parent = nullptr;
+            activeTree = newRoot;
+            geneFluxActive.erase(evt.nodeId);
+            if (hopEvents.is_open()) {
+                hopEvents << timer << "," << hop << "," << currentX
+                          << ",gene_flux_boundary_root," << gfNode->time << ",,,\n";
+            }
+            delete gfNode;
+            continue;
+        }
+
         if (!gfNode->parent || gfNode->children.size() != 1) {
             if (hopEvents.is_open()) {
                 hopEvents << timer << "," << hop << "," << currentX
