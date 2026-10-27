@@ -795,24 +795,32 @@ int main(int argc, const char *argv[])
         vector<EdgeWeight> inverted_edges;
 
         int hop = 0;
+        // Remember why we arrived at currentX so we apply the matching tree update.
+        HorizontalBoundaryType_SMC currentBoundaryType =
+            HorizontalBoundaryType_SMC::Recombination;
         while (currentX < params.paramData->smcRange.R) {
             const double activeEps = 1e-12;
-            profT0 = profNow();
-            if (!processGeneFluxBoundariesAtX(activeTree,
-                                             geneFluxActive,
-                                             *params.paramData,
-                                             mig_prob_cut,
-                                             horizontal_standard_schedule,
-                                             horizontal_inverted_schedule,
-                                             currentX,
-                                             hop,
-                                             timer,
-                                             nextNodeId,
-                                             hopEvents)) {
-                std::cerr << "SMC gene-flux boundary processing failed.\n";
-                break;
+            // A tract endpoint already identifies the affected lineage and
+            // cuts/reattaches it here; it must not also trigger a random recombination.
+            // normal recomb horinzotal boundary processing is now handled downstreap in another conditional
+            if (currentBoundaryType == HorizontalBoundaryType_SMC::GeneFluxEnd) {
+                profT0 = profNow();
+                if (!processGeneFluxBoundariesAtX(activeTree,
+                                                 geneFluxActive,
+                                                 *params.paramData,
+                                                 mig_prob_cut,
+                                                 horizontal_standard_schedule,
+                                                 horizontal_inverted_schedule,
+                                                 currentX,
+                                                 hop,
+                                                 timer,
+                                                 nextNodeId,
+                                                 hopEvents)) {
+                    std::cerr << "SMC gene-flux boundary processing failed.\n";
+                    break;
+                }
+                profAdd(profBoundary, profT0);
             }
-            profAdd(profBoundary, profT0);
 
             standard_edges.clear();
             inverted_edges.clear();
@@ -832,87 +840,90 @@ int main(int argc, const char *argv[])
             if (rho <= 0.0) {
                 break;
             }
-            TreeNode* p = nullptr;
-            TreeNode* c = nullptr;
-            profT0 = profNow();
-            bool picked = pickWeightedEdge(standard_edges,
-                                           inverted_edges,
-                                           &p,
-                                           &c);
-            profAdd(profEdgePick, profT0);
-            if (!picked) {
-                std::cerr << "SMC cut-tree step failed (could not sample weighted edge).\n";
-                break;
-            }
-            if (!p || !c || c->parent != p) {
-                std::cerr << "SMC cut-tree step failed (sampled edge not found in tree).\n";
-                break;
-            }
-            TreeNode* workingTree = activeTree;
-            TreeNode* cutSubtree = nullptr;
-            double cutStartTime = 0.0;
-            vector<unsigned long> deletedIds;
-            profT0 = profNow();
-            bool cutOk = cutEdgeRandomWithCleanupCollect(workingTree,
-                                                         p,
-                                                         c,
-                                                         &cutSubtree,
-                                                         &cutStartTime,
-                                                         deletedIds);
-            profAdd(profCut, profT0);
-            if (!cutOk) {
-                activeTree = workingTree;
-                if (cutSubtree && !cutSubtree->parent) freeTree(cutSubtree);
-                std::cerr << "SMC cut-tree step skipped (invalid cut edge).\n";
-                break;
-            }
-            profT0 = profNow();
-            profFluxRemoveScans += deletedIds.size();
-            geneFluxActive.removeDeleted(deletedIds);
-            profAdd(profFluxBook, profT0);
             SMCStepOutcome outcome;
-            profT0 = profNow();
-            bool ok = simulateSMCOnTree_SMC(workingTree,
-                                            cutSubtree,
-                                            cutStartTime,
-                                            *params.paramData,
-                                            mig_prob_cut,
-                                            horizontal_standard_schedule,
-                                            horizontal_inverted_schedule,
-                                            currentX,
-                                            hop,
-                                            &outcome,
-                                            timer,
-                                            nextNodeId,
-                                            hopEvents);
-            profAdd(profSim, profT0);
-
-            profT0 = profNow();
-            geneFluxActive.addIncoming(outcome.geneFluxEvents, currentX, activeEps);
-            if (geneFluxActive.size() > profMaxActiveFlux) profMaxActiveFlux = geneFluxActive.size();
-            profAdd(profFluxBook, profT0);
-
-            if (!ok) {
-                if (hopEvents.is_open()) {
-                    for (const auto& row : outcome.eventRows) {
-                        hopEvents << timer << "," << row;
-                    }
-                    hopEvents << timer << ","
-                               << hop << ","
-                               << currentX << ","
-                               << "reattach_failed,"
-                               << ",,,\n";
+            // Only an ordinary recombination boundary selects and cuts a random edge.
+            if (currentBoundaryType == HorizontalBoundaryType_SMC::Recombination) {
+                TreeNode* p = nullptr;
+                TreeNode* c = nullptr;
+                profT0 = profNow();
+                bool picked = pickWeightedEdge(standard_edges,
+                                               inverted_edges,
+                                               &p,
+                                               &c);
+                profAdd(profEdgePick, profT0);
+                if (!picked) {
+                    std::cerr << "SMC cut-tree step failed (could not sample weighted edge).\n";
+                    break;
                 }
-                activeTree = workingTree;
-                if (cutSubtree && !cutSubtree->parent) freeTree(cutSubtree);
-                std::cerr << "SMC cut-tree step failed to reattach.\n";
-                break;
-            }
+                if (!p || !c || c->parent != p) {
+                    std::cerr << "SMC cut-tree step failed (sampled edge not found in tree).\n";
+                    break;
+                }
+                TreeNode* workingTree = activeTree;
+                TreeNode* cutSubtree = nullptr;
+                double cutStartTime = 0.0;
+                vector<unsigned long> deletedIds;
+                profT0 = profNow();
+                bool cutOk = cutEdgeRandomWithCleanupCollect(workingTree,
+                                                             p,
+                                                             c,
+                                                             &cutSubtree,
+                                                             &cutStartTime,
+                                                             deletedIds);
+                profAdd(profCut, profT0);
+                if (!cutOk) {
+                    activeTree = workingTree;
+                    if (cutSubtree && !cutSubtree->parent) freeTree(cutSubtree);
+                    std::cerr << "SMC cut-tree step skipped (invalid cut edge).\n";
+                    break;
+                }
+                profT0 = profNow();
+                profFluxRemoveScans += deletedIds.size();
+                geneFluxActive.removeDeleted(deletedIds);
+                profAdd(profFluxBook, profT0);
+                profT0 = profNow();
+                bool ok = simulateSMCOnTree_SMC(workingTree,
+                                                cutSubtree,
+                                                cutStartTime,
+                                                *params.paramData,
+                                                mig_prob_cut,
+                                                horizontal_standard_schedule,
+                                                horizontal_inverted_schedule,
+                                                currentX,
+                                                hop,
+                                                &outcome,
+                                                timer,
+                                                nextNodeId,
+                                                hopEvents);
+                profAdd(profSim, profT0);
 
-            profT0 = profNow();
-            trimUnaryRootStem(workingTree);
-            activeTree = workingTree;
-            profAdd(profTreeReplace, profT0);
+                profT0 = profNow();
+                geneFluxActive.addIncoming(outcome.geneFluxEvents, currentX, activeEps);
+                if (geneFluxActive.size() > profMaxActiveFlux) profMaxActiveFlux = geneFluxActive.size();
+                profAdd(profFluxBook, profT0);
+
+                if (!ok) {
+                    if (hopEvents.is_open()) {
+                        for (const auto& row : outcome.eventRows) {
+                            hopEvents << timer << "," << row;
+                        }
+                        hopEvents << timer << ","
+                                   << hop << ","
+                                   << currentX << ","
+                                   << "reattach_failed,"
+                                   << ",,,\n";
+                    }
+                    activeTree = workingTree;
+                    if (cutSubtree && !cutSubtree->parent) freeTree(cutSubtree);
+                    std::cerr << "SMC cut-tree step failed to reattach.\n";
+                    break;
+                }
+
+                profT0 = profNow();
+                trimUnaryRootStem(workingTree);
+                activeTree = workingTree;
+                profAdd(profTreeReplace, profT0);
+            }
 
             profT0 = profNow();
             const double rawHopDelta = sampleHopDeltaFromRho(rho);
@@ -980,6 +991,8 @@ int main(int argc, const char *argv[])
                 }
             }
             currentX = nextX;
+            // Use the selected boundary type to choose the update at nextX.
+            currentBoundaryType = boundaryType;
             ++hop;
             profAdd(profDiagnostics, profT0);
         }
