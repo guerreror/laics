@@ -1,6 +1,8 @@
 #include "treemod.h"
 #include "ran_mk.h"
 
+#include <algorithm>
+
 static void freeRec(TreeNode* node) {
     if (!node) return;
     for (auto* ch : node->children) {
@@ -92,16 +94,28 @@ static bool cutAtNodeWithUnaryCleanupImpl(TreeNode*& root,
     TreeNode* coal = curParent; // first non-unary ancestor on this path
     TreeNode* coalParent = nullptr;
     TreeNode* sibling = nullptr;
+    bool retainMultifurcation = false;
 
     if (coal) {
         coalParent = coal->parent;
-        for (auto* ch : coal->children) {
-            if (ch != pathTop) {
-                sibling = ch;
-                break;
+        if (coal->children.size() > 2) {
+            // Removing one path from a multifurcation still leaves a valid
+            // branching node. Keep that node and every uncut child.
+            auto pathIt = std::find(coal->children.begin(),
+                                    coal->children.end(),
+                                    pathTop);
+            if (pathIt == coal->children.end()) return false;
+            coal->children.erase(pathIt);
+            retainMultifurcation = true;
+        } else {
+            for (auto* ch : coal->children) {
+                if (ch != pathTop) {
+                    sibling = ch;
+                    break;
+                }
             }
+            sibling = trimRetainedSiblingAfterCut(sibling, cutTime, deletedIds);
         }
-        sibling = trimRetainedSiblingAfterCut(sibling, cutTime, deletedIds);
     }
 
     // Detach cut subtree root.
@@ -109,7 +123,7 @@ static bool cutAtNodeWithUnaryCleanupImpl(TreeNode*& root,
     *outCutSubtree = cutNode;
 
     // Rewire around coalescent node if present.
-    if (coal && sibling) {
+    if (coal && !retainMultifurcation && sibling) {
         if (coalParent) {
             for (auto& ch : coalParent->children) {
                 if (ch == coal) {
@@ -136,7 +150,7 @@ static bool cutAtNodeWithUnaryCleanupImpl(TreeNode*& root,
     }
 
     // Delete coalescent node itself as requested after rewiring sibling.
-    if (coal) {
+    if (coal && !retainMultifurcation) {
         coal->children.clear();
         coal->parent = nullptr;
         noteDeleted(coal, deletedIds);
