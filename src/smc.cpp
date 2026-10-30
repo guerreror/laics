@@ -255,21 +255,49 @@ static bool processGeneFluxBoundariesAtX(
             continue;
         }
 
-        // A later recombination can leave a protected tract marker as a
-        // unary root. There is no retained ancestry to reattach against in
-        // that case, so ending the tract only requires removing the marker.
-        if (!gfNode->parent && gfNode == activeTree && gfNode->children.size() == 1) {
-            TreeNode* newRoot = gfNode->children.front();
-            gfNode->children.clear();
-            newRoot->parent = nullptr;
-            activeTree = newRoot;
-            geneFluxActive.erase(evt.nodeId);
-            if (hopEvents.is_open()) {
-                hopEvents << timer << "," << hop << "," << currentX
-                          << ",gene_flux_boundary_root," << gfNode->time << ",,,\n";
+        // Later recombination can leave a protected tract marker anywhere on
+        // an entirely unary stem leading to the root. With no sibling branch
+        // above the marker, there is no retained ancestry to reattach against.
+        // Promote its child and discard the now-obsolete ancestry above it.
+        if (gfNode->children.size() == 1) {
+            bool unaryToRoot = true;
+            for (TreeNode* ancestor = gfNode->parent;
+                 ancestor;
+                 ancestor = ancestor->parent) {
+                if (ancestor->children.size() != 1) {
+                    unaryToRoot = false;
+                    break;
+                }
             }
-            delete gfNode;
-            continue;
+
+            if (unaryToRoot) {
+                const bool markerWasRoot = (gfNode == activeTree);
+                const double markerTime = gfNode->time;
+                TreeNode* newRoot = gfNode->children.front();
+                newRoot->parent = nullptr;
+
+                vector<unsigned long> deletedIds;
+                TreeNode* obsolete = gfNode;
+                while (obsolete) {
+                    TreeNode* parent = obsolete->parent;
+                    deletedIds.push_back(obsolete->id);
+                    obsolete->children.clear();
+                    obsolete->parent = nullptr;
+                    delete obsolete;
+                    obsolete = parent;
+                }
+
+                activeTree = newRoot;
+                geneFluxActive.removeDeleted(deletedIds);
+                if (hopEvents.is_open()) {
+                    hopEvents << timer << "," << hop << "," << currentX
+                              << (markerWasRoot
+                                      ? ",gene_flux_boundary_root,"
+                                      : ",gene_flux_boundary_unary_stem,")
+                              << markerTime << ",,,\n";
+                }
+                continue;
+            }
         }
 
         if (!gfNode->parent || gfNode->children.size() != 1) {
