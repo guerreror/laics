@@ -298,59 +298,31 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
 
 
     const std::size_t outputBase = base + (randomSample ? 1 : pops);
-    paramData->gcRate = 1.0;
-    if (param_vec.size() > outputBase) {
-        paramData->smcVerbose = (param_vec[outputBase] == "1");
-    }
-
-    paramData->targetSNPs.clear();
-    if (param_vec.size() > outputBase + 1) {
-        iss.clear();
-        iss.str(param_vec[outputBase + 1]);
-        while (iss >> doubtemp) {
-            paramData->targetSNPs.push_back(doubtemp);
-        }
-        sort(paramData->targetSNPs.begin(), paramData->targetSNPs.end());
-        paramData->targetSNPs.erase(
-            std::unique(paramData->targetSNPs.begin(), paramData->targetSNPs.end()),
-            paramData->targetSNPs.end());
-    }
-
     paramData->gcRate = 0.0;
-    if (param_vec.size() > outputBase + 2) {
-        paramData->gcRate = std::stod(param_vec[outputBase + 2]);
+    if (param_vec.size() > outputBase) {
+        paramData->gcRate = std::stod(param_vec[outputBase]);
     }
 
     paramData->drRate = 0.0;
-    if (param_vec.size() > outputBase + 3) {
-        paramData->drRate = std::stod(param_vec[outputBase + 3]);
+    if (param_vec.size() > outputBase + 1) {
+        paramData->drRate = std::stod(param_vec[outputBase + 1]);
     }
 
     paramData->tractSize = 200.0;
-    if (param_vec.size() > outputBase + 4) {
-        paramData->tractSize = std::stod(param_vec[outputBase + 4]);
+    if (param_vec.size() > outputBase + 2) {
+        paramData->tractSize = std::stod(param_vec[outputBase + 2]);
     }
 
     paramData->homoGcRate = 0.0;
-    if (param_vec.size() > outputBase + 5) {
-        paramData->homoGcRate = std::stod(param_vec[outputBase + 5]);
+    if (param_vec.size() > outputBase + 3) {
+        paramData->homoGcRate = std::stod(param_vec[outputBase + 3]);
     }
 
     paramData->hopInformation = false;
-    if (param_vec.size() > outputBase + 6) {
-        paramData->hopInformation = (param_vec[outputBase + 6] == "1");
+    if (param_vec.size() > outputBase + 4) {
+        paramData->hopInformation = (param_vec[outputBase + 4] == "1");
     }
 
-    std::cerr << "Verbose " << paramData->smcVerbose << '\n';
-    if (paramData->targetSNPs.empty()) {
-        std::cerr << "SMC target SNP diagnostics: none\n";
-    } else {
-        std::cerr << "SMC target SNP diagnostics (raw units): ";
-        for (double x : paramData->targetSNPs) {
-            std::cerr << x << " ";
-        }
-        std::cerr << '\n';
-    }
     std::cerr << "Heterokaryotypic Gene Conversion Rate: " << paramData->gcRate << '\n';
     std::cerr << "Homokaryotypic Gene Conversion Rate: " << paramData->homoGcRate << '\n';
     std::cerr << "Double Recombination Rate: " << paramData->drRate << '\n';
