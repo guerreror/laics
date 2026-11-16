@@ -20,6 +20,7 @@ Demes:
   root:
     inversion_frequency: 0.6
 HopInformation: "0"
+Pairwise: "0"
 GeneConversionRate: "0.0000000488"
 DoubleRecombinationRate: "0.00002"
 TractSize: "200"

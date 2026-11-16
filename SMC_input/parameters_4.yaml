@@ -1,5 +1,5 @@
-Seed: "4"
-NumberOfReplicates: "1"
+Seed: "-1"
+NumberOfReplicates: "10"
 KingmanCoal: "1"
 DriftSimulation: "0"
 InversionAge: "1300000"
@@ -20,6 +20,7 @@ Demes:
   root:
     inversion_frequency: 0.6
 HopInformation: "0"
+Pairwise: "0"
 GeneConversionRate: "0.000001"
 DoubleRecombinationRate: "0.0000001"
 TractSize: "200"

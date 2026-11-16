@@ -484,7 +484,7 @@ unsigned short World::coalesceEvent(vector<double>& rate, double total){
         //
         vector<int> carr_idx;
         for (int u=0; u< worldData->carriers->at(c).size(); ++u) carr_idx.push_back(u);
-        random_shuffle(carr_idx.begin(), carr_idx.end());
+        std::shuffle(carr_idx.begin(), carr_idx.end(), gen);
         
         shared_ptr<Chromosome> chrom = worldData->carriers->at(c).at(carr_idx.at(0));
         shared_ptr<Chromosome> chrom2 = worldData->carriers->at(c).at(carr_idx.at(1));

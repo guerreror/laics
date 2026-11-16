@@ -1,0 +1,10 @@
+--deleted 600 lines of code and unwanted files.
+--runtime from 10s - 0.6s - 0.38s
+--Verbose, MSOutput, SMC flag (SMC Flah=g shld be adressed)
+--REORGANIZED (json.hpp, mig matrices)...streamlined the I/O folders (txt file for parsed tree and stuffs)
+--fixed elapsed time value
+--optimized batch running
+--Got rid of boost library
+--ask about random shuffle
+--tskit tree size 47mb without simplify and compression. 4.7 TB for 100,000 runs. Simplify?
+--Readme file stuff, pairwise stuff

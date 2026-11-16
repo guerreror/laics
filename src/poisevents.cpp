@@ -59,7 +59,7 @@ unsigned short World::migratePoisson(vector < vector< double> >& mig_prob){
 				if(ev > k) ev = k;
 				vector<int> carr_idx;
 				for (int u=0; u< worldData->carriers->at(c).size(); ++u) carr_idx.push_back(u);
-				random_shuffle(carr_idx.begin(), carr_idx.end());
+				std::shuffle(carr_idx.begin(), carr_idx.end(), gen);
 				
 				for(int o=0;o<ev;++o){
 					shared_ptr<Chromosome> who = worldData->carriers->at(c).at(carr_idx.at(o));

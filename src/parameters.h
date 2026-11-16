@@ -68,6 +68,7 @@
      double drRate;
      double tractSize;
      bool hopInformation;
+     bool pairwise;
      double timestamp;
      unsigned long totalPopSize;
  };

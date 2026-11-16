@@ -8,6 +8,7 @@
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <utility>
@@ -424,31 +425,46 @@ static bool collapseInversionAge_SMC(TreeNode*& mainRoot,
         return true;
     }
 
-    TreeNode* origin = new TreeNode();
-    origin->id = nextId++;
-    origin->time = eventTime;
-    origin->context = originCtx;
-    origin->parent = nullptr;
-
-    for (size_t i = 0; i < candidates.size(); ++i) {
-        TreeNode* child = candidates[i].child;
-        if (i == 0) {
-            replaceChild_SMC(candidates[i].parent, child, origin);
-        } else {
-            TreeNode* oldParent = candidates[i].parent;
-            replaceChild_SMC(oldParent, child, nullptr);
-            pruneEmptyAncestors_SMC(mainRoot, oldParent);
-        }
-        child->parent = origin;
-        origin->children.push_back(child);
-    }
-    if (!origin->parent) mainRoot = origin;
-
+    TreeNode* anchorParent = candidates.front().parent;
+    TreeNode* anchorChild = candidates.front().child;
+    std::vector<TreeNode*> lineages;
+    lineages.reserve(candidates.size() + (cutInverted ? 1 : 0));
+    for (const auto& candidate : candidates) lineages.push_back(candidate.child);
     if (cutInverted) {
-        cutRoot->parent = origin;
-        origin->children.push_back(cutRoot);
+        lineages.push_back(cutRoot);
         cutCollapsed = true;
     }
+
+    for (size_t i = 1; i < candidates.size(); ++i) {
+        TreeNode* oldParent = candidates[i].parent;
+        replaceChild_SMC(oldParent, candidates[i].child, nullptr);
+        candidates[i].child->parent = nullptr;
+        pruneEmptyAncestors_SMC(mainRoot, oldParent);
+    }
+
+    if (lineages.size() == 1) {
+        TreeNode* origin = addUnaryAbove(lineages.front(), nextId++, eventTime, originCtx);
+        if (origin && !origin->parent) mainRoot = origin;
+        return true;
+    }
+
+    TreeNode* origin = lineages.front();
+    for (size_t i = 1; i < lineages.size(); ++i) {
+        TreeNode* coal = new TreeNode();
+        coal->id = nextId++;
+        const double childTime = std::max(origin->time, lineages[i]->time);
+        coal->time = eventTime > childTime
+            ? eventTime
+            : std::nextafter(childTime, std::numeric_limits<double>::infinity());
+        coal->context = originCtx;
+        coal->children = {origin, lineages[i]};
+        origin->parent = coal;
+        lineages[i]->parent = coal;
+        origin = coal;
+    }
+
+    replaceChild_SMC(anchorParent, anchorChild, origin);
+    if (!origin->parent) mainRoot = origin;
     return true;
 }
 
@@ -642,9 +658,9 @@ static bool resolveAboveRootByMiniSMC_SMC(TreeNode*& mainRoot,
             if (rem < totalG_i[i]) {
                 Context newCtx = lineages[i]->context;
                 newCtx.inversion = (newCtx.inversion == 0 ? 1 : 0);
+                const std::string geneFluxType = pickGeneFluxType_SMC(currentHopX, params);
                 TreeNode* nr = addUnaryAbove(lineages[i], nextId++, event_time, newCtx);
                 if (nr && nr->parent == nullptr) lineages[i] = nr;
-                const std::string geneFluxType = pickGeneFluxType_SMC(currentHopX, params);
                 if (outcome) {
                     GeneFluxEvent_SMC evt = makeGeneFluxSegment_SMC(currentHopX,
                                                                     nr ? nr->id : 0,
@@ -844,13 +860,13 @@ bool simulateSMCOnTree_SMC(TreeNode*& mainRoot,
             Context newCtx = cutRoot->context;
             newCtx.inversion = (newCtx.inversion == 0 ? 1 : 0);
             const unsigned long geneFluxNodeId = nextNodeId++;
+            const std::string geneFluxType = pickGeneFluxType_SMC(nextGeneFluxStartX, params);
             TreeNode* newRoot = addUnaryAbove(cutRoot, geneFluxNodeId, event_time, newCtx);
             if (newRoot->parent == nullptr) {
                 cutRoot = newRoot;
             }
             lineageTime = event_time;
 
-            const std::string geneFluxType = pickGeneFluxType_SMC(nextGeneFluxStartX, params);
             GeneFluxEvent_SMC evt = makeGeneFluxSegment_SMC(nextGeneFluxStartX,
                                                             geneFluxNodeId,
                                                             geneFluxType,
@@ -1070,7 +1086,7 @@ unsigned short World::coalesceEvent_SMC(vector<double>& rate, double total) {
     int c = whichClust.lower_bound(randreal(0, 1))->second;
     vector<int> carr_idx;
     for (int u = 0; u < static_cast<int>(worldData->carriers->at(c).size()); ++u) carr_idx.push_back(u);
-    random_shuffle(carr_idx.begin(), carr_idx.end());
+    std::shuffle(carr_idx.begin(), carr_idx.end(), gen);
 
     std::shared_ptr<Chromosome> chrom = worldData->carriers->at(c).at(carr_idx.at(0));
     std::shared_ptr<Chromosome> chrom2 = worldData->carriers->at(c).at(carr_idx.at(1));

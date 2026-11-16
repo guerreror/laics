@@ -76,6 +76,7 @@ parameters = {
     "dr":           "0.0",
     "tractSize":    "200",
     "hopInformation": "0",
+    "pairwise":     "0",
 }
 
 YAML_KEY_ALIASES = {
@@ -100,6 +101,7 @@ YAML_KEY_ALIASES = {
     "DoubleRecombinationRate": "dr",
     "TractSize": "tractSize",
     "HopInformation": "hopInformation",
+    "Pairwise": "pairwise",
 }
 
 # ---------- Helpers for demes ----------
@@ -508,6 +510,11 @@ except Exception as e:
     print(f"Error loading {PARAMETERS_YAML}: {e}", file=sys.stderr)
     sys.exit(1)
 
+pairwise_value = str(other_params.get("Pairwise", other_params.get("pairwise", "0"))).strip()
+if pairwise_value not in ("0", "1"):
+    print("Error: Pairwise must be 0 or 1.", file=sys.stderr)
+    sys.exit(1)
+
 TREE_OUTPUT_DIR = None
 if smc_flag == "1":
     tree_output_root = other_params.get(
@@ -515,14 +522,20 @@ if smc_flag == "1":
     )
     tree_output_root = os.path.expandvars(str(tree_output_root or "")).strip()
     if tree_output_root:
-        TREE_OUTPUT_DIR = Path(tree_output_root).expanduser().resolve() / OUTPUT_DIR.name / "smc_trees"
+        tree_output_dir = Path(tree_output_root).expanduser().resolve() / OUTPUT_DIR.name / "smc_trees"
     else:
-        TREE_OUTPUT_DIR = OUTPUT_DIR / "smc_trees"
-    if TREE_OUTPUT_DIR.is_symlink():
-        TREE_OUTPUT_DIR.unlink()
-    elif TREE_OUTPUT_DIR.exists():
-        shutil.rmtree(TREE_OUTPUT_DIR)
-    TREE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        tree_output_dir = OUTPUT_DIR / "smc_trees"
+    if tree_output_dir.is_symlink():
+        tree_output_dir.unlink()
+    elif tree_output_dir.exists():
+        shutil.rmtree(tree_output_dir)
+    if pairwise_value == "0":
+        TREE_OUTPUT_DIR = tree_output_dir
+        TREE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+pairwise_output = OUTPUT_DIR / "pairwise_results.csv"
+if smc_flag == "1" and pairwise_output.exists():
+    pairwise_output.unlink()
 
 # Copy keys from parameter YAML
 for key, val in (other_params or {}).items():
@@ -721,6 +734,13 @@ cpp_args_order_before_legacy_phi = [
 pops = _count_pops_from_graph(graph)
 random_flag = parameters.get("randomSample","0").strip()
 per_pop_strings = _collect_per_pop_strings(parameters, pops, random_flag)
+if smc_flag == "1" and parameters["pairwise"] == "1":
+    pairwise_sample_size = sum(
+        value for sample in per_pop_strings for value in _ints_in_str(sample)
+    )
+    if pairwise_sample_size < 2:
+        print("Error: Pairwise mode requires at least two sampled individuals.", file=sys.stderr)
+        sys.exit(1)
 
 # Compose final argv list
 legacy_phi_args = ["0", "0"] if smc_flag == "1" else [parameters["randPhi"], parameters["phi"]]
@@ -748,6 +768,7 @@ args_list += [
 if smc_flag == "1":
     args_list += [
         parameters["hopInformation"],
+        parameters["pairwise"],
     ]
 
 try:
@@ -756,6 +777,8 @@ try:
     process_env["LAICS_ADJUSTED_STANDARD_MIGRATION_JSON"] = ADJUSTED_STANDARD_MIGRATION_JSON
     process_env["LAICS_ADJUSTED_INVERTED_MIGRATION_JSON"] = ADJUSTED_INVERTED_MIGRATION_JSON
     process_env["LAICS_RUN_DETAILS"] = RUN_DETAILS
+    if parameters["pairwise"] == "1":
+        process_env["LAICS_PAIRWISE_OUTPUT"] = str(pairwise_output)
     if TREE_OUTPUT_DIR:
         process_env["LAICS_TREE_OUTPUT_DIR"] = str(TREE_OUTPUT_DIR)
     proc = subprocess.Popen(
@@ -787,3 +810,6 @@ if proc.returncode != 0:
 if smc_flag != "1":
     with open("Output_log.txt", "w") as log_file:
         log_file.writelines(stderr_lines)
+
+if proc.returncode != 0:
+    sys.exit(proc.returncode)

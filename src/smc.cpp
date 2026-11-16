@@ -25,6 +25,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <queue>
+#include <array>
 #include <sys/stat.h>
 
 #include <tskit/tables.h>
@@ -129,6 +130,58 @@ static double sampleHopDeltaFromRho(double rho)
 {
     if (rho <= 0.0) return -1.0;
     return randexp(rho);
+}
+
+struct PairwiseBucket {
+    unsigned int pop;
+    unsigned short inversion;
+};
+
+static std::array<PairwiseBucket, 2> selectPairwiseBuckets(
+    const vector<vector<int>>& samples)
+{
+    size_t totalSamples = 0;
+    for (unsigned int pop = 0; pop < samples.size(); ++pop) {
+        for (unsigned short inv = 0; inv < samples[pop].size(); ++inv) {
+            totalSamples += static_cast<size_t>(std::max(0, samples[pop][inv]));
+        }
+    }
+    if (totalSamples < 2) {
+        throw std::runtime_error("Pairwise mode requires at least two sampled individuals.");
+    }
+
+    auto drawBucket = [](const vector<vector<int>>& counts, size_t total) {
+        const size_t roll = std::uniform_int_distribution<size_t>(0, total - 1)(gen);
+        size_t cumulative = 0;
+        for (unsigned int pop = 0; pop < counts.size(); ++pop) {
+            for (unsigned short inv = 0; inv < counts[pop].size(); ++inv) {
+                cumulative += static_cast<size_t>(std::max(0, counts[pop][inv]));
+                if (roll < cumulative) return PairwiseBucket{pop, inv};
+            }
+        }
+        throw std::runtime_error("Pairwise bucket selection failed.");
+    };
+
+    const PairwiseBucket first = drawBucket(samples, totalSamples);
+    auto remaining = samples;
+    --remaining[first.pop][first.inversion];
+    const PairwiseBucket second = drawBucket(remaining, totalSamples - 1);
+    return {{first, second}};
+}
+
+static void applyPairwiseBuckets(vector<vector<int>>& samples,
+                                 const std::array<PairwiseBucket, 2>& pair)
+{
+    for (auto& pop : samples) std::fill(pop.begin(), pop.end(), 0);
+    for (const auto& bucket : pair) {
+        ++samples[bucket.pop][bucket.inversion];
+    }
+}
+
+static string pairwiseLabel(const PairwiseBucket& bucket)
+{
+    return "pop" + std::to_string(bucket.pop) + "_" +
+           (bucket.inversion == 0 ? "standard" : "inverted");
 }
 
 static bool pickWeightedEdge(const vector<EdgeWeight>& standard_edges,
@@ -676,6 +729,7 @@ int main(int argc, const char *argv[])
     double profCut = 0.0, profSim = 0.0, profAppend = 0.0, profTskWrite = 0.0;
     double profEdgePick = 0.0, profEdgeCopy = 0.0, profFluxBook = 0.0, profTreeReplace = 0.0;
     double profDelta = 0.0, profDiagnostics = 0.0;
+    double treeCollectSeconds = 0.0, treeWriteSeconds = 0.0;
     unsigned long long profActiveMinScans = 0, profFluxRemoveScans = 0, profMaxActiveFlux = 0;
     unsigned long long profHops = 0;
 
@@ -779,14 +833,14 @@ int main(int argc, const char *argv[])
     };
 
     std::ofstream hopTrace;
-    if (params.paramData->hopInformation) {
+    if (params.paramData->hopInformation && !params.paramData->pairwise) {
         hopTrace.open("smc_hop_trace.csv");
     }
     if (hopTrace.is_open()) {
         hopTrace << "run,hop,current_x,raw_delta_x,used_delta_x,next_x,rho,Li_sum,Ls_sum,root_time\n";
     }
     std::ofstream hopEvents;
-    if (params.paramData->hopInformation) {
+    if (params.paramData->hopInformation && !params.paramData->pairwise) {
         hopEvents.open("smc_hop_events.csv");
     }
     if (hopEvents.is_open()) {
@@ -798,8 +852,31 @@ int main(int argc, const char *argv[])
     const std::string treeOutputDir =
         treeOutputPath && *treeOutputPath ? treeOutputPath : "smc_trees";
 
+    const auto originalSamples = params.paramData->nCarriers;
+    std::array<PairwiseBucket, 2> selectedPair{};
+    std::ofstream pairwiseOutput;
+    if (params.paramData->pairwise) {
+        const char* path = std::getenv("LAICS_PAIRWISE_OUTPUT");
+        pairwiseOutput.open(path && *path ? path : "pairwise_results.csv");
+        if (!pairwiseOutput) {
+            throw std::runtime_error("Could not open pairwise results output.");
+        }
+        pairwiseOutput << "Bucket1,Bucket2,CoalescentTime\n";
+        pairwiseOutput << std::setprecision(17);
+    }
+
     for (int timer = 0; timer < (int)nRuns; ++timer)
     {
+        if (params.paramData->pairwise) {
+            try {
+                selectedPair = selectPairwiseBuckets(originalSamples);
+            } catch (const std::exception& e) {
+                std::cerr << "Error: " << e.what() << std::endl;
+                return EXIT_FAILURE;
+            }
+            params.paramData->nCarriers = originalSamples;
+            applyPairwiseBuckets(params.paramData->nCarriers, selectedPair);
+        }
         resetMigrationState();
         params.setSNPs();
         params.setCarriers();
@@ -841,7 +918,18 @@ int main(int argc, const char *argv[])
         }
         unsigned long nextNodeId = getMaxId(activeTree) + 1;
         double currentX = startX;
-        treeSequences.append(activeTree, timer, currentX, currentX);
+        auto treeStart = ProfileClock::now();
+        double treeSeconds = 0.0;
+        if (params.paramData->pairwise) {
+            pairwiseOutput << pairwiseLabel(selectedPair[0]) << ","
+                           << pairwiseLabel(selectedPair[1]) << ","
+                           << activeTree->time << "\n";
+        } else {
+            treeSequences.append(activeTree, timer, currentX, currentX);
+            treeSeconds = elapsedSec(treeStart, ProfileClock::now());
+            treeCollectSeconds += treeSeconds;
+            if (smcProfile) profAppend += treeSeconds;
+        }
         ActiveGeneFluxSet geneFluxActive;
         vector<EdgeWeight> standard_edges;
         vector<EdgeWeight> inverted_edges;
@@ -993,9 +1081,17 @@ int main(int argc, const char *argv[])
                 continue;
             }
             profAdd(profDelta, profT0);
-            profT0 = profNow();
-            treeSequences.append(activeTree, timer, currentX, nextX);
-            profAdd(profAppend, profT0);
+            treeStart = ProfileClock::now();
+            if (params.paramData->pairwise) {
+                pairwiseOutput << pairwiseLabel(selectedPair[0]) << ","
+                               << pairwiseLabel(selectedPair[1]) << ","
+                               << activeTree->time << "\n";
+            } else {
+                treeSequences.append(activeTree, timer, currentX, nextX);
+                treeSeconds = elapsedSec(treeStart, ProfileClock::now());
+                treeCollectSeconds += treeSeconds;
+                if (smcProfile) profAppend += treeSeconds;
+            }
             ++profHops;
 
             profT0 = profNow();
@@ -1038,14 +1134,16 @@ int main(int argc, const char *argv[])
         if (hopTrace.is_open()) hopTrace.flush();
         freeTree(activeTree);
 
-        treeSequences.finishRun(timer);
+        if (!params.paramData->pairwise) treeSequences.finishRun(timer);
         delete world;
         printProgress(timer + 1, static_cast<int>(nRuns), progressBucket);
 
-        if (treeSequences.storedBytes() >= treeBatchBytes || timer + 1 == static_cast<int>(nRuns)) {
+        if (!params.paramData->pairwise &&
+            (treeSequences.storedBytes() >= treeBatchBytes || timer + 1 == static_cast<int>(nRuns))) {
             const auto writeStart = ProfileClock::now();
             treeSequences.write(treeOutputDir);
             const double seconds = elapsedSec(writeStart, ProfileClock::now());
+            treeWriteSeconds += seconds;
             if (smcProfile) profTskWrite += seconds;
             treeSequences.clear();
         }
@@ -1053,6 +1151,10 @@ int main(int argc, const char *argv[])
 
     end = std::chrono::system_clock::now();
     std::chrono::duration<double> elapsed_seconds = end - start;
+    const double treeProcessingSeconds = treeCollectSeconds + treeWriteSeconds;
+    const double simulationSeconds = std::max(0.0, elapsed_seconds.count() - treeProcessingSeconds);
+    std::cerr << "Simulation elapsed time: " << simulationSeconds << "s\n";
+    std::cerr << "Tree processing elapsed time: " << treeProcessingSeconds << "s\n";
     std::cerr << "Total elapsed time: " << elapsed_seconds.count() << "s\n";
     if (smcProfile) {
         std::cerr << "SMC_PROFILE hops=" << profHops << "\n";

@@ -323,11 +323,17 @@ Parameters::Parameters(const char *insstring, const std::vector<std::string> &pa
         paramData->hopInformation = (param_vec[outputBase + 4] == "1");
     }
 
+    paramData->pairwise = false;
+    if (param_vec.size() > outputBase + 5) {
+        paramData->pairwise = (param_vec[outputBase + 5] == "1");
+    }
+
     std::cerr << "Heterokaryotypic Gene Conversion Rate: " << paramData->gcRate << '\n';
     std::cerr << "Homokaryotypic Gene Conversion Rate: " << paramData->homoGcRate << '\n';
     std::cerr << "Double Recombination Rate: " << paramData->drRate << '\n';
     std::cerr << "Tract Size: " << paramData->tractSize << '\n';
     std::cerr << "Hop information: " << paramData->hopInformation << '\n';
+    std::cerr << "Pairwise mode: " << paramData->pairwise << '\n';
 }
 
 Parameters::~Parameters(){
