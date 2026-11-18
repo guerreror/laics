@@ -15,9 +15,9 @@ from pathlib import Path
 import yaml
 
 if __package__:
-    from .run_smc_batch import expand_grid_runs
+    from .run_smc_batch import doc_key, grid_variants, strip_grid
 else:
-    from run_smc_batch import expand_grid_runs
+    from run_smc_batch import doc_key, grid_variants, strip_grid
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -214,6 +214,36 @@ def materialize_scenarios(parameters_path, demes_path, run_directory, settings):
                 }
             )
     return scenarios
+
+    
+def expand_grid_runs(demes_doc, params_doc):
+    """Adapt the existing grid helpers without changing the local batch runner."""
+    demes_base, demes_grid = strip_grid(demes_doc)
+    params_base, params_grid = strip_grid(params_doc)
+    runs = []
+    if demes_grid:
+        for name, doc, _, _ in grid_variants(demes_base, demes_grid, "demes"):
+            runs.append((name, doc, params_base))
+    if params_grid:
+        for name, doc, _, _ in grid_variants(params_base, params_grid, "parameters"):
+            runs.append((name, demes_base, doc))
+    if not runs:
+        runs.append(("base", demes_base, params_base))
+
+    deduped_runs = []
+    seen_runs = set()
+    base_run_key = doc_key(demes_base, params_base)
+    for run in runs:
+        key_for_run = doc_key(run[1], run[2])
+        if key_for_run in seen_runs:
+            continue
+        seen_runs.add(key_for_run)
+        if key_for_run == base_run_key:
+            run = ("base", run[1], run[2])
+        deduped_runs.append(run)
+    return deduped_runs
+
+
 
 # before submitting slurm array, make sure compiled execs are availible
 def validate_runtime(root=ROOT, sbatch_command="sbatch"):
