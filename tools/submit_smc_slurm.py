@@ -2,6 +2,7 @@
 """Submit one SMC parameter/demes pair as a Slurm array."""
 
 import os
+import shutil
 from pathlib import Path
 
 import yaml
@@ -19,6 +20,7 @@ DEFAULTS = {
 }
 
 
+# check if slurm mode is on
 def _boolean(value, name):
     if isinstance(value, bool):
         return value
@@ -29,7 +31,7 @@ def _boolean(value, name):
         return False
     raise ValueError(f"{name} must be 0, 1, false, or true.")
 
-
+# type/error check for yaml value, stupid
 def _positive_integer(value, name):
     if isinstance(value, bool) or (isinstance(value, float) and not value.is_integer()):
         raise ValueError(f"{name} must be a positive integer.")
@@ -41,7 +43,7 @@ def _positive_integer(value, name):
         raise ValueError(f"{name} must be a positive integer.")
     return value
 
-
+# yaml adv file path 
 def _yaml_mapping(path, description):
     path = Path(path).resolve()
     if not path.is_file():
@@ -52,7 +54,7 @@ def _yaml_mapping(path, description):
         raise ValueError(f"{description} must contain a YAML mapping: {path}")
     return document
 
-
+# check default or adv settings for slurm submissions
 def load_slurm_settings(parameters_path):
     """Load the Slurm toggle and optional advanced settings for one run."""
     parameters_path = Path(parameters_path).resolve()
@@ -89,6 +91,7 @@ def load_slurm_settings(parameters_path):
     return settings
 
 
+# auto resource/replicate allocation for slurm array tasks
 def plan_work(number_of_replicates, settings):
     """Divide replicates among one-CPU Slurm array tasks."""
     number_of_replicates = _positive_integer(
@@ -109,3 +112,49 @@ def plan_work(number_of_replicates, settings):
         "TaskCount": task_count,
         "Tasks": tasks,
     }
+
+# create a directory for each slurm task, and save the param/demes files for those tasks
+def materialize_task_inputs(parameters_path, demes_path, run_directory, plan):
+    """Write one parameter file per task and one shared demes snapshot."""
+    parameters_path = Path(parameters_path).resolve()
+    demes_path = Path(demes_path).resolve()
+    parameters = _yaml_mapping(parameters_path, "Parameter file")
+    if not demes_path.is_file():
+        raise FileNotFoundError(f"Demes file does not exist: {demes_path}")
+
+    try:
+        base_seed = int(parameters.get("Seed", 1))
+    except (TypeError, ValueError):
+        raise ValueError("Seed must be an integer.")
+
+    run_directory = Path(run_directory).resolve()
+    run_directory.mkdir(parents=True, exist_ok=True)
+    shared_demes = run_directory / "demes.yaml"
+    shutil.copy2(demes_path, shared_demes)
+
+    task_inputs = []
+    for task_index, replicate_count in enumerate(plan["Tasks"]):
+        task_directory = run_directory / f"task_{task_index:04d}"
+        task_directory.mkdir(parents=True, exist_ok=True)
+
+        task_parameters = dict(parameters)
+        task_parameters.pop("SlurmMode", None)
+        task_parameters.pop("SlurmConfig", None)
+        task_parameters["NumberOfReplicates"] = str(replicate_count)
+        task_parameters["Seed"] = str(base_seed + task_index)
+
+        task_parameter_path = task_directory / "parameters.yaml"
+        with task_parameter_path.open("w") as handle:
+            yaml.safe_dump(task_parameters, handle, sort_keys=False)
+
+        task_inputs.append(
+            {
+                "TaskIndex": task_index,
+                "Replicates": replicate_count,
+                "Seed": base_seed + task_index,
+                "Directory": str(task_directory),
+                "Parameters": str(task_parameter_path),
+            }
+        )
+
+    return {"Demes": str(shared_demes), "Tasks": task_inputs}
