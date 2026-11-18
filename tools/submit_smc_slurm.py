@@ -10,8 +10,6 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULTS = {
     "Cores": 10,
-    "ReplicatesPerProcess": 10,
-    "ProcessesPerTask": 10,
     "MemoryPerTask": "8G",
     "TimeLimit": "00:20:00",
     "Partition": "",
@@ -74,8 +72,7 @@ def load_slurm_settings(parameters_path):
             raise ValueError("Unknown Slurm setting(s): " + ", ".join(unknown))
         settings.update(advanced)
 
-    for name in ("Cores", "ReplicatesPerProcess", "ProcessesPerTask"):
-        settings[name] = _positive_integer(settings[name], name)
+    settings["Cores"] = _positive_integer(settings["Cores"], "Cores")
     settings["Compile"] = _boolean(settings["Compile"], "Compile")
 
     for name in ("MemoryPerTask", "TimeLimit"):
@@ -90,3 +87,25 @@ def load_slurm_settings(parameters_path):
         output_root = ROOT / output_root
     settings["OutputRoot"] = str(output_root.resolve())
     return settings
+
+
+def plan_work(number_of_replicates, settings):
+    """Divide replicates among one-CPU Slurm array tasks."""
+    number_of_replicates = _positive_integer(
+        number_of_replicates, "NumberOfReplicates"
+    )
+    task_count = min(settings["Cores"], number_of_replicates)
+    replicates_per_task, extra_replicates = divmod(
+        number_of_replicates, task_count
+    )
+    tasks = [
+        replicates_per_task + 1
+        if task_index < extra_replicates
+        else replicates_per_task
+        for task_index in range(task_count)
+    ]
+    return {
+        "NumberOfReplicates": number_of_replicates,
+        "TaskCount": task_count,
+        "Tasks": tasks,
+    }
