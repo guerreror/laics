@@ -3,9 +3,15 @@
 
 import os
 import shutil
+import tempfile
 from pathlib import Path
 
 import yaml
+
+if __package__:
+    from .run_smc_batch import expand_grid_runs
+else:
+    from run_smc_batch import expand_grid_runs
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -158,3 +164,49 @@ def materialize_task_inputs(parameters_path, demes_path, run_directory, plan):
         )
 
     return {"Demes": str(shared_demes), "Tasks": task_inputs}
+
+# allow the functionallity of grid search mode with slurm mode
+def materialize_scenarios(parameters_path, demes_path, run_directory, settings):
+    """Expand existing GridSearch scenarios and prepare their array tasks."""
+    parameters_path = Path(parameters_path).resolve()
+    demes_path = Path(demes_path).resolve()
+    parameters = _yaml_mapping(parameters_path, "Parameter file")
+    demes = _yaml_mapping(demes_path, "Demes file")
+    runs = expand_grid_runs(demes, parameters)
+
+    run_directory = Path(run_directory).resolve()
+    scenarios = []
+    with tempfile.TemporaryDirectory(prefix="laics_slurm_grid_") as temporary:
+        temporary = Path(temporary)
+        for variant_name, demes_document, parameters_document in runs:
+            run_label = (
+                demes_path.stem
+                if variant_name == "base"
+                else f"{demes_path.stem}__{variant_name}"
+            )
+            scenario_directory = run_directory / run_label
+            temporary_demes = temporary / f"{run_label}_demes.yaml"
+            temporary_parameters = temporary / f"{run_label}_parameters.yaml"
+            with temporary_demes.open("w") as handle:
+                yaml.safe_dump(demes_document, handle, sort_keys=False)
+            with temporary_parameters.open("w") as handle:
+                yaml.safe_dump(parameters_document, handle, sort_keys=False)
+
+            replicate_count = parameters_document.get("NumberOfReplicates", 1)
+            plan = plan_work(replicate_count, settings)
+            materialized = materialize_task_inputs(
+                temporary_parameters,
+                temporary_demes,
+                scenario_directory,
+                plan,
+            )
+            scenarios.append(
+                {
+                    "Name": run_label,
+                    "Variant": variant_name,
+                    "Directory": str(scenario_directory),
+                    "Plan": plan,
+                    "Inputs": materialized,
+                }
+            )
+    return scenarios
