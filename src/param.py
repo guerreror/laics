@@ -41,6 +41,44 @@ cli_args = cli.parse_args()
 PARAMETERS_YAML = cli_args.config
 DEMES_YAML = cli_args.demes
 smc_flag = "1" if cli_args.mode == "smc" else "0"
+
+
+# if users wish to parallel process replicates and merge results
+def slurm_mode_enabled(value):
+    if isinstance(value, bool):
+        return value
+    text = str(value or "0").strip().lower()
+    if text in {"0", "false"}:
+        return False
+    if text in {"1", "true"}:
+        return True
+    raise ValueError("SlurmMode must be 0, 1, false, or true.")
+
+
+# Slurm workers receive generated parameter files with SlurmMode removed, so
+# only the user's original SMC invocation enters this submission path.
+if smc_flag == "1":
+    try:
+        with open(PARAMETERS_YAML, "r") as parameter_handle:
+            launch_parameters = yaml.safe_load(parameter_handle) or {}
+        use_slurm = slurm_mode_enabled(launch_parameters.get("SlurmMode", False))
+    except Exception as error:
+        print(f"Error checking SlurmMode in {PARAMETERS_YAML}: {error}", file=sys.stderr)
+        raise SystemExit(1)
+
+    if use_slurm:
+        root = Path(__file__).resolve().parents[1]
+        submitter = root / "tools" / "submit_smc_slurm.py"
+        command = [
+            sys.executable,
+            str(submitter),
+            "--config",
+            str(Path(PARAMETERS_YAML).resolve()),
+            "--demes",
+            str(Path(DEMES_YAML).resolve()),
+        ]
+        raise SystemExit(subprocess.run(command, cwd=root).returncode)
+
 OUTPUT_DIR = Path(cli_args.output_dir).resolve()
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 MIGRATION_JSON = str(OUTPUT_DIR / "migration_matrices.json")
@@ -781,9 +819,15 @@ while True:
         if smc_flag != "1":
             stderr_lines.append(ch)
 
-if proc.returncode != 0:
-    print(f"\nExecutable exited with code {proc.returncode}", file=sys.stderr)
-
 if smc_flag != "1":
     with open("Output_log.txt", "w") as log_file:
         log_file.writelines(stderr_lines)
+
+if proc.returncode != 0:
+    print(f"\nExecutable exited with code {proc.returncode}", file=sys.stderr)
+    # subprocess uses negative return codes when a signal terminates the
+    # executable. Convert those to the conventional shell status (for
+    # example, SIGKILL/-9 becomes 137) so local and Slurm callers reliably
+    # see this run as failed.
+    exit_code = proc.returncode if proc.returncode > 0 else 128 + abs(proc.returncode)
+    raise SystemExit(exit_code)
