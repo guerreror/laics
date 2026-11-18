@@ -1,0 +1,13 @@
+# Optional overrides used when a parameter file contains SlurmMode: "1".
+Cores: 10
+ReplicatesPerProcess: 10
+ProcessesPerTask: 10
+MemoryPerTask: "8G"
+TimeLimit: "00:20:00"
+
+# Leave these empty to use the cluster defaults.
+Partition: ""
+Account: ""
+
+OutputRoot: "batch_outputs"
+Compile: true
